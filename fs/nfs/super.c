@@ -2699,6 +2699,9 @@ EXPORT_SYMBOL_GPL(nfs_fs_mount_common);
 
 static int validate_user_ns(struct nfs_parsed_mount_data *args, int flags)
 {
+	if (args->user_ns != &init_user_ns && args->version != 4)
+		goto out_not_v4;
+
 	if (!args->user_ns)
 		args->user_ns = get_user_ns(current_user_ns());
 
@@ -2720,6 +2723,10 @@ static int validate_user_ns(struct nfs_parsed_mount_data *args, int flags)
 out_not_capable:
 	dfprintk(MOUNT, "NFS: User does not have global CAP_SYS_ADMIN\n");
 	return -EPERM;
+out_not_v4:
+	dfprintk(MOUNT, "NFS: NFS Version %d does not support userns\n",
+		 args->version);
+	return -EINVAL;
 }
 
 struct dentry *nfs_fs_mount(struct file_system_type *fs_type,
