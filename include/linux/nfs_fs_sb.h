@@ -120,6 +120,7 @@ struct nfs_client {
 #endif
 
 	struct net		*cl_net;
+	struct user_namespace	*user_ns;
 };
 
 /*

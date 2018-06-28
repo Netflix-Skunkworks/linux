@@ -3491,14 +3491,25 @@ static int nfs4_lookup_root_sec(struct nfs_server *server, struct nfs_fh *fhandl
 				struct nfs_fsinfo *info, rpc_authflavor_t flavor)
 {
 	struct rpc_auth_create_args auth_args = {
-		.pseudoflavor = flavor,
+		.pseudoflavor 	= flavor,
 	};
-	struct rpc_auth *auth;
+	struct rpc_auth *auth = NULL;
+	int ret = -EACCES;
+
+	if (!server->nfs_client)
+		auth_args.user_ns = &init_user_ns;
+	else
+		auth_args.user_ns = server->nfs_client->user_ns;
 
 	auth = rpcauth_create(&auth_args, server->client);
-	if (IS_ERR(auth))
-		return -EACCES;
-	return nfs4_lookup_root(server, fhandle, info);
+	if (!auth)
+		goto out;
+	if (IS_ERR(auth)) {
+		goto out;
+	}
+	ret = nfs4_lookup_root(server, fhandle, info);
+out:
+	return ret;
 }
 
 /*

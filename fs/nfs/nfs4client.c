@@ -831,7 +831,8 @@ static int nfs4_set_client(struct nfs_server *server,
 		const size_t addrlen,
 		const char *ip_addr,
 		int proto, const struct rpc_timeout *timeparms,
-		u32 minorversion, struct net *net)
+		u32 minorversion, struct net *net,
+		struct user_namespace *user_ns)
 {
 	struct nfs_client_initdata cl_init = {
 		.hostname = hostname,
@@ -842,6 +843,7 @@ static int nfs4_set_client(struct nfs_server *server,
 		.proto = proto,
 		.minorversion = minorversion,
 		.net = net,
+		.user_ns = user_ns,
 		.timeparms = timeparms,
 	};
 	struct nfs_client *clp;
@@ -1041,7 +1043,8 @@ static int nfs4_init_server(struct nfs_server *server,
 			data->nfs_server.protocol,
 			&timeparms,
 			data->minorversion,
-			data->net);
+			data->net,
+			data->user_ns);
 	if (error < 0)
 		return error;
 
@@ -1125,7 +1128,8 @@ struct nfs_server *nfs4_create_referral_server(struct nfs_clone_mount *data,
 				rpc_protocol(parent_server->client),
 				parent_server->client->cl_timeout,
 				parent_client->cl_mvops->minor_version,
-				parent_client->cl_net);
+				parent_client->cl_net,
+				parent_client->user_ns);
 	if (error < 0)
 		goto error;
 
@@ -1217,8 +1221,10 @@ int nfs4_update_server(struct nfs_server *server, const char *hostname,
 	set_bit(NFS_MIG_TSM_POSSIBLE, &server->mig_status);
 	error = nfs4_set_client(server, hostname, sap, salen, buf,
 				clp->cl_proto, clnt->cl_timeout,
-				clp->cl_minorversion, net);
+				clp->cl_minorversion, net, clp->user_ns);
+
 	clear_bit(NFS_MIG_TSM_POSSIBLE, &server->mig_status);
+	nfs_put_client(clp);
 	if (error != 0) {
 		nfs_server_insert_lists(server);
 		return error;
