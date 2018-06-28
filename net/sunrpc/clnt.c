@@ -294,8 +294,9 @@ static int rpc_client_register(struct rpc_clnt *clnt,
 			       const char *client_name)
 {
 	struct rpc_auth_create_args auth_args = {
-		.pseudoflavor = pseudoflavor,
-		.target_name = client_name,
+		.pseudoflavor	= pseudoflavor,
+		.target_name	= client_name,
+		.user_ns	= &init_user_ns,
 	};
 	struct rpc_auth *auth;
 	struct net *net = rpc_net_ns(clnt);

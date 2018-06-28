@@ -15,10 +15,16 @@
 #include <linux/sunrpc/auth.h>
 #include <linux/user_namespace.h>
 
+struct unix_auth {
+	struct rpc_auth		rpc_auth;
+	struct user_namespace	*user_ns;
+};
+
 struct unx_cred {
 	struct rpc_cred		uc_base;
 	kgid_t			uc_gid;
 	kgid_t			uc_gids[UNX_NGROUPS];
+	struct user_namespace	*user_ns;
 };
 #define uc_uid			uc_base.cr_uid
 
@@ -26,31 +32,71 @@ struct unx_cred {
 # define RPCDBG_FACILITY	RPCDBG_AUTH
 #endif
 
-static struct rpc_auth		unix_auth;
 static const struct rpc_credops	unix_credops;
 
 static struct rpc_auth *
-unx_create(struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
+unx_create(const struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
 {
+	struct unix_auth *unix_auth;
+	struct rpc_auth *auth;
+	int err = -ENOMEM;
+
 	dprintk("RPC:       creating UNIX authenticator for client %p\n",
 			clnt);
-	atomic_inc(&unix_auth.au_count);
-	return &unix_auth;
+	if (!try_module_get(THIS_MODULE))
+		return ERR_PTR(-EINVAL);
+	unix_auth = kmalloc(sizeof(*unix_auth), GFP_KERNEL);
+	if (!unix_auth)
+		goto error;
+
+	unix_auth->user_ns = get_user_ns(args->user_ns);
+	auth = &unix_auth->rpc_auth;
+
+	auth->au_cslack = UNX_CALLSLACK;
+	auth->au_rslack = NUL_REPLYSLACK,
+	auth->au_flags = RPCAUTH_AUTH_NO_CRKEY_TIMEOUT,
+	auth->au_ops = &authunix_ops,
+	auth->au_flavor = RPC_AUTH_UNIX;
+	atomic_set(&unix_auth->rpc_auth.au_count, 1);
+
+	err = rpcauth_init_credcache(auth);
+	if (err)
+		goto error_free_auth;
+
+	return auth;
+
+error_free_auth:
+	put_user_ns(unix_auth->user_ns);
+	kfree(unix_auth);
+error:
+	module_put(THIS_MODULE);
+	return ERR_PTR(err);
 }
 
 static void
 unx_destroy(struct rpc_auth *auth)
 {
+	struct unix_auth *unix_auth;
+
+	unix_auth = container_of(auth, struct unix_auth, rpc_auth);
 	dprintk("RPC:       destroying UNIX authenticator %p\n", auth);
-	rpcauth_clear_credcache(auth->au_credcache);
+	rpcauth_destroy_credcache(auth);
+	put_user_ns(unix_auth->user_ns);
+	kfree(unix_auth);
+	module_put(THIS_MODULE);
 }
 
 static int
 unx_hash_cred(struct auth_cred *acred, unsigned int hashbits)
 {
-	return hash_64(from_kgid(&init_user_ns, acred->gid) |
-		((u64)from_kuid(&init_user_ns, acred->uid) <<
-			(sizeof(gid_t) * 8)), hashbits);
+	/*
+	 * No need to convert this based on the user namespace, because
+	 * the cred cache is only scoped to the unix_auth instances
+	 */
+	uid_t uid = __kuid_val(acred->uid);
+	gid_t gid = __kgid_val(acred->gid);
+
+	return hash_64(gid | ((u64)uid << (sizeof(gid_t) * 8)), hashbits);
 }
 
 /*
@@ -65,19 +111,22 @@ unx_lookup_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 static struct rpc_cred *
 unx_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags, gfp_t gfp)
 {
+	struct unix_auth *unix_auth;
 	struct unx_cred	*cred;
 	unsigned int groups = 0;
 	unsigned int i;
 
+	unix_auth = container_of(auth, struct unix_auth, rpc_auth);
 	dprintk("RPC:       allocating UNIX cred for uid %d gid %d\n",
-			from_kuid(&init_user_ns, acred->uid),
-			from_kgid(&init_user_ns, acred->gid));
+			from_kuid(unix_auth->user_ns, acred->uid),
+			from_kgid(unix_auth->user_ns, acred->gid));
 
 	if (!(cred = kmalloc(sizeof(*cred), gfp)))
 		return ERR_PTR(-ENOMEM);
 
 	rpcauth_init_cred(&cred->uc_base, acred, auth, &unix_credops);
 	cred->uc_base.cr_flags = 1UL << RPCAUTH_CRED_UPTODATE;
+	cred->user_ns = get_user_ns(unix_auth->user_ns);
 
 	if (acred->group_info != NULL)
 		groups = acred->group_info->ngroups;
@@ -97,6 +146,7 @@ static void
 unx_free_cred(struct unx_cred *unx_cred)
 {
 	dprintk("RPC:       unx_free_cred %p\n", unx_cred);
+	put_user_ns(unx_cred->user_ns);
 	kfree(unx_cred);
 }
 
@@ -162,11 +212,11 @@ unx_marshal(struct rpc_task *task, __be32 *p)
 	 */
 	p = xdr_encode_array(p, clnt->cl_nodename, clnt->cl_nodelen);
 
-	*p++ = htonl((u32) from_kuid(&init_user_ns, cred->uc_uid));
-	*p++ = htonl((u32) from_kgid(&init_user_ns, cred->uc_gid));
+	*p++ = htonl((u32)from_kuid(cred->user_ns, cred->uc_uid));
+	*p++ = htonl((u32)from_kgid(cred->user_ns, cred->uc_gid));
 	hold = p++;
 	for (i = 0; i < UNX_NGROUPS && gid_valid(cred->uc_gids[i]); i++)
-		*p++ = htonl((u32) from_kgid(&init_user_ns, cred->uc_gids[i]));
+		*p++ = htonl((u32)from_kgid(cred->user_ns, cred->uc_gids[i]));
 	*hold = htonl(p - hold - 1);		/* gid array length */
 	*base = htonl((p - base - 1) << 2);	/* cred length */
 
@@ -211,16 +261,6 @@ unx_validate(struct rpc_task *task, __be32 *p)
 	return p;
 }
 
-int __init rpc_init_authunix(void)
-{
-	return rpcauth_init_credcache(&unix_auth);
-}
-
-void rpc_destroy_authunix(void)
-{
-	rpcauth_destroy_credcache(&unix_auth);
-}
-
 const struct rpc_authops authunix_ops = {
 	.owner		= THIS_MODULE,
 	.au_flavor	= RPC_AUTH_UNIX,
@@ -230,16 +270,7 @@ const struct rpc_authops authunix_ops = {
 	.hash_cred	= unx_hash_cred,
 	.lookup_cred	= unx_lookup_cred,
 	.crcreate	= unx_create_cred,
-};
-
-static
-struct rpc_auth		unix_auth = {
-	.au_cslack	= UNX_CALLSLACK,
-	.au_rslack	= NUL_REPLYSLACK,
-	.au_flags	= RPCAUTH_AUTH_NO_CRKEY_TIMEOUT,
-	.au_ops		= &authunix_ops,
-	.au_flavor	= RPC_AUTH_UNIX,
-	.au_count	= ATOMIC_INIT(0),
+	.user_ns	= false,
 };
 
 static

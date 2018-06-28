@@ -253,7 +253,7 @@ rpcauth_list_flavors(rpc_authflavor_t *array, int size)
 EXPORT_SYMBOL_GPL(rpcauth_list_flavors);
 
 struct rpc_auth *
-rpcauth_create(struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
+rpcauth_create(const struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
 {
 	struct rpc_auth		*auth;
 	const struct rpc_authops *ops;
@@ -272,7 +272,8 @@ rpcauth_create(struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
 		goto out;
 	}
 	spin_unlock(&rpc_authflavor_lock);
-	auth = ops->create(args, clnt);
+	if (args->user_ns == &init_user_ns || ops->user_ns)
+		auth = ops->create(args, clnt);
 	module_put(ops->owner);
 	if (IS_ERR(auth))
 		return auth;
@@ -870,27 +871,21 @@ int __init rpcauth_init_module(void)
 {
 	int err;
 
-	err = rpc_init_authunix();
-	if (err < 0)
-		goto out1;
 	err = rpc_init_generic_auth();
 	if (err < 0)
-		goto out2;
+		goto out1;
 	err = register_shrinker(&rpc_cred_shrinker);
 	if (err < 0)
-		goto out3;
+		goto out2;
 	return 0;
-out3:
-	rpc_destroy_generic_auth();
 out2:
-	rpc_destroy_authunix();
+	rpc_destroy_generic_auth();
 out1:
 	return err;
 }
 
 void rpcauth_remove_module(void)
 {
-	rpc_destroy_authunix();
 	rpc_destroy_generic_auth();
 	unregister_shrinker(&rpc_cred_shrinker);
 }

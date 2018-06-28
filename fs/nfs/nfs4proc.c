@@ -3657,7 +3657,8 @@ static int nfs4_lookup_root_sec(struct nfs_server *server, struct nfs_fh *fhandl
 				struct nfs_fsinfo *info, rpc_authflavor_t flavor)
 {
 	struct rpc_auth_create_args auth_args = {
-		.pseudoflavor = flavor,
+		.pseudoflavor	= flavor,
+		.user_ns	= &init_user_ns,
 	};
 	struct rpc_auth *auth;
 

@@ -111,6 +111,7 @@ struct rpc_auth {
 
 struct rpc_auth_create_args {
 	rpc_authflavor_t pseudoflavor;
+	struct user_namespace *user_ns;
 	const char *target_name;
 };
 
@@ -125,7 +126,9 @@ struct rpc_authops {
 	struct module		*owner;
 	rpc_authflavor_t	au_flavor;	/* flavor (RPC_AUTH_*) */
 	char *			au_name;
-	struct rpc_auth *	(*create)(struct rpc_auth_create_args *, struct rpc_clnt *);
+	bool			user_ns;	/* supports user namespaces */
+	struct rpc_auth *	(*create)(const struct rpc_auth_create_args *,
+					  struct rpc_clnt *);
 	void			(*destroy)(struct rpc_auth *);
 
 	int			(*hash_cred)(struct auth_cred *, unsigned int);
@@ -161,12 +164,10 @@ struct rpc_credops {
 extern const struct rpc_authops	authunix_ops;
 extern const struct rpc_authops	authnull_ops;
 
-int __init		rpc_init_authunix(void);
 int __init		rpc_init_generic_auth(void);
 int __init		rpcauth_init_module(void);
 void			rpcauth_remove_module(void);
 void			rpc_destroy_generic_auth(void);
-void 			rpc_destroy_authunix(void);
 
 struct rpc_cred *	rpc_lookup_cred(void);
 struct rpc_cred *	rpc_lookup_cred_nonblock(void);
@@ -174,7 +175,7 @@ struct rpc_cred *	rpc_lookup_generic_cred(struct auth_cred *, int, gfp_t);
 struct rpc_cred *	rpc_lookup_machine_cred(const char *service_name);
 int			rpcauth_register(const struct rpc_authops *);
 int			rpcauth_unregister(const struct rpc_authops *);
-struct rpc_auth *	rpcauth_create(struct rpc_auth_create_args *,
+struct rpc_auth *	rpcauth_create(const struct rpc_auth_create_args *,
 				struct rpc_clnt *);
 void			rpcauth_release(struct rpc_auth *);
 rpc_authflavor_t	rpcauth_get_pseudoflavor(rpc_authflavor_t,
