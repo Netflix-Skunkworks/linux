@@ -3662,9 +3662,14 @@ static int nfs4_lookup_root_sec(struct nfs_server *server, struct nfs_fh *fhandl
 	};
 	struct rpc_auth *auth;
 
+	if (server->nfs_client)
+		auth_args.user_ns = server->nfs_client->user_ns;
+
 	auth = rpcauth_create(&auth_args, server->client);
 	if (IS_ERR(auth))
 		return -EACCES;
+	BUG_ON(!auth);
+
 	return nfs4_lookup_root(server, fhandle, info);
 }
 
