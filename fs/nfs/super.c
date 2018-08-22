@@ -2726,7 +2726,7 @@ static int validate_user_ns(struct nfs_parsed_mount_data *args, int flags)
 		goto out_not_capable;
 
 	if (args->user_ns != &init_user_ns)
-		args->flags |= NFS_MOUNT_UNSHARED;
+		mnt->options &= ~(NFS_OPTION_FSCACHE | NFS_MOUNT_UNSHARED);
 
 	return 0;
 
