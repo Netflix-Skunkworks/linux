@@ -270,6 +270,7 @@ static const struct rpc_authops generic_auth_ops = {
 	.lookup_cred = generic_lookup_cred,
 	.crcreate = generic_create_cred,
 	.key_timeout = generic_key_timeout,
+	.user_ns = false,
 };
 
 static struct rpc_auth generic_auth = {

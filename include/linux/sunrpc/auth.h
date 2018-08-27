@@ -111,6 +111,7 @@ struct rpc_auth {
 
 struct rpc_auth_create_args {
 	rpc_authflavor_t pseudoflavor;
+	struct user_namespace *user_ns;
 	const char *target_name;
 };
 
@@ -126,6 +127,7 @@ struct rpc_authops {
 	rpc_authflavor_t	au_flavor;	/* flavor (RPC_AUTH_*) */
 	char *			au_name;
 	struct rpc_auth *	(*create)(struct rpc_auth_create_args *, struct rpc_clnt *);
+	bool			user_ns;	/* supports user namespaces */
 	void			(*destroy)(struct rpc_auth *);
 
 	int			(*hash_cred)(struct auth_cred *, unsigned int);
@@ -161,12 +163,10 @@ struct rpc_credops {
 extern const struct rpc_authops	authunix_ops;
 extern const struct rpc_authops	authnull_ops;
 
-int __init		rpc_init_authunix(void);
 int __init		rpc_init_generic_auth(void);
 int __init		rpcauth_init_module(void);
 void			rpcauth_remove_module(void);
 void			rpc_destroy_generic_auth(void);
-void 			rpc_destroy_authunix(void);
 
 struct rpc_cred *	rpc_lookup_cred(void);
 struct rpc_cred *	rpc_lookup_cred_nonblock(void);
