@@ -3662,12 +3662,16 @@ static int nfs4_lookup_root_sec(struct nfs_server *server, struct nfs_fh *fhandl
 	};
 	struct rpc_auth *auth;
 
-	if (server->nfs_client)
+	if (server->nfs_client) {
 		auth_args.user_ns = server->nfs_client->user_ns;
+		dprintk("Setting auth_auths to non init-user ns\n");
+	}
 
 	auth = rpcauth_create(&auth_args, server->client);
-	if (IS_ERR(auth))
+	if (IS_ERR(auth)) {
+		dprintk("Cannot setup rpc auth\n");
 		return -EACCES;
+	}
 	BUG_ON(!auth);
 
 	return nfs4_lookup_root(server, fhandle, info);

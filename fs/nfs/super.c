@@ -2709,8 +2709,10 @@ EXPORT_SYMBOL_GPL(nfs_fs_mount_common);
 static int validate_user_ns(struct nfs_parsed_mount_data *args, int flags)
 {
 	dfprintk(MOUNT, "NFS: Running validate_user_ns\n");
-	if (args->user_ns != &init_user_ns && args->version != 4)
+	if (args->user_ns != &init_user_ns && args->version != 4) {
+		dfprintk(MOUNT, "NFS: unable to setup userns, because NFS version is not supported\n");
 		goto out_not_v4;
+	}
 
 	if (!args->user_ns)
 		args->user_ns = get_user_ns(current_user_ns());
