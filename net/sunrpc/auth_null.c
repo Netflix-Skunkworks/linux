@@ -110,6 +110,7 @@ const struct rpc_authops authnull_ops = {
 	.create		= nul_create,
 	.destroy	= nul_destroy,
 	.lookup_cred	= nul_lookup_cred,
+	.user_ns	= true,
 };
 
 static
