@@ -122,6 +122,8 @@ struct nfs_client {
 #endif
 
 	struct net		*cl_net;
+	struct list_head	pending_cb_stateids;
+	struct user_namespace	*user_ns;
 };
 
 /*
