@@ -272,8 +272,7 @@ rpcauth_create(struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
 		goto out;
 	}
 	spin_unlock(&rpc_authflavor_lock);
-	if (args->user_ns == &init_user_ns || ops->user_ns)
-		auth = ops->create(args, clnt);
+	auth = ops->create(args, clnt);
 	module_put(ops->owner);
 	if (IS_ERR(auth))
 		return auth;
