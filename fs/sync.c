@@ -109,6 +109,10 @@ void ksys_sync(void)
 {
 	int nowait = 0, wait = 1;
 
+	/* Who thought it was a good idea to let users do this? */
+	if (!capable(CAP_SYS_ADMIN))
+		return;
+
 	wakeup_flusher_threads(WB_REASON_SYNC);
 	iterate_supers(sync_inodes_one_sb, NULL);
 	iterate_supers(sync_fs_one_sb, &nowait);
@@ -306,6 +310,11 @@ int ksys_sync_file_range(int fd, loff_t offset, loff_t nbytes,
 	if (endbyte < offset)
 		goto out;
 
+	/* Short circuit this sync for folks who are not sys_admin */
+	if (!capable(CAP_SYS_ADMIN)) {
+		ret = 0;
+		goto out;
+	}
 	if (sizeof(pgoff_t) == 4) {
 		if (offset >= (0x100000000ULL << PAGE_SHIFT)) {
 			/*
