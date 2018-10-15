@@ -732,7 +732,7 @@ int nfs_map_name_to_uid(const struct nfs_server *server, const char *name, size_
 	if (!nfs_map_string_to_numeric(name, namelen, &id))
 		ret = nfs_idmap_lookup_id(name, namelen, "uid", &id, idmap);
 	if (ret == 0) {
-		*uid = make_kuid(&init_user_ns, id);
+		*uid = make_kuid(server->nfs_client->cl_net->user_ns, id);
 		if (!uid_valid(*uid))
 			ret = -ERANGE;
 	}
@@ -749,7 +749,7 @@ int nfs_map_group_to_gid(const struct nfs_server *server, const char *name, size
 	if (!nfs_map_string_to_numeric(name, namelen, &id))
 		ret = nfs_idmap_lookup_id(name, namelen, "gid", &id, idmap);
 	if (ret == 0) {
-		*gid = make_kgid(&init_user_ns, id);
+		*gid = make_kgid(server->nfs_client->cl_net->user_ns, id);
 		if (!gid_valid(*gid))
 			ret = -ERANGE;
 	}
@@ -763,7 +763,7 @@ int nfs_map_uid_to_name(const struct nfs_server *server, kuid_t uid, char *buf, 
 	int ret = -EINVAL;
 	__u32 id;
 
-	id = from_kuid(&init_user_ns, uid);
+	id = from_kuid(server->nfs_client->cl_net->user_ns, uid);
 	if (!(server->caps & NFS_CAP_UIDGID_NOMAP))
 		ret = nfs_idmap_lookup_name(id, "user", buf, buflen, idmap);
 	if (ret < 0)
@@ -777,7 +777,7 @@ int nfs_map_gid_to_group(const struct nfs_server *server, kgid_t gid, char *buf,
 	int ret = -EINVAL;
 	__u32 id;
 
-	id = from_kgid(&init_user_ns, gid);
+	id = from_kgid(server->nfs_client->cl_net->user_ns, gid);
 	if (!(server->caps & NFS_CAP_UIDGID_NOMAP))
 		ret = nfs_idmap_lookup_name(id, "group", buf, buflen, idmap);
 	if (ret < 0)
