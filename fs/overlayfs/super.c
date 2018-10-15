@@ -249,34 +249,10 @@ static void ovl_put_super(struct super_block *sb)
 	ovl_free_fs(ofs);
 }
 
-/* Sync real dirty inodes in upper filesystem (if it exists) */
+/* Do not sync overlayfs, this is bad for the system's health */
 static int ovl_sync_fs(struct super_block *sb, int wait)
 {
-	struct ovl_fs *ofs = sb->s_fs_info;
-	struct super_block *upper_sb;
-	int ret;
-
-	if (!ofs->upper_mnt)
-		return 0;
-
-	/*
-	 * If this is a sync(2) call or an emergency sync, all the super blocks
-	 * will be iterated, including upper_sb, so no need to do anything.
-	 *
-	 * If this is a syncfs(2) call, then we do need to call
-	 * sync_filesystem() on upper_sb, but enough if we do it when being
-	 * called with wait == 1.
-	 */
-	if (!wait)
-		return 0;
-
-	upper_sb = ofs->upper_mnt->mnt_sb;
-
-	down_read(&upper_sb->s_umount);
-	ret = sync_filesystem(upper_sb);
-	up_read(&upper_sb->s_umount);
-
-	return ret;
+	return 0;
 }
 
 /**
