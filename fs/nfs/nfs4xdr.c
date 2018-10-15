@@ -1098,7 +1098,7 @@ static void encode_attrs(struct xdr_stream *xdr, const struct iattr *iap,
 		owner_namelen = nfs_map_uid_to_name(server, iap->ia_uid, owner_name, IDMAP_NAMESZ);
 		if (owner_namelen < 0) {
 			dprintk("nfs: couldn't resolve uid %d to string\n",
-					from_kuid(&init_user_ns, iap->ia_uid));
+					from_kuid(server->nfs_client->cl_net->user_ns, iap->ia_uid));
 			/* XXX */
 			strcpy(owner_name, "nobody");
 			owner_namelen = sizeof("nobody") - 1;
@@ -1112,7 +1112,7 @@ static void encode_attrs(struct xdr_stream *xdr, const struct iattr *iap,
 		owner_grouplen = nfs_map_gid_to_group(server, iap->ia_gid, owner_group, IDMAP_NAMESZ);
 		if (owner_grouplen < 0) {
 			dprintk("nfs: couldn't resolve gid %d to string\n",
-					from_kgid(&init_user_ns, iap->ia_gid));
+					from_kgid(server->nfs_client->cl_net->user_ns, iap->ia_gid));
 			strcpy(owner_group, "nobody");
 			owner_grouplen = sizeof("nobody") - 1;
 			/* goto out; */
@@ -3989,7 +3989,7 @@ static int decode_attr_owner(struct xdr_stream *xdr, uint32_t *bitmap,
 	ssize_t len;
 	char *p;
 
-	*uid = make_kuid(&init_user_ns, -2);
+	*uid = make_kuid(server->nfs_client->cl_net->user_ns, -2);
 	if (unlikely(bitmap[1] & (FATTR4_WORD1_OWNER - 1U)))
 		return -EIO;
 	if (!(bitmap[1] & FATTR4_WORD1_OWNER))
@@ -4007,7 +4007,7 @@ static int decode_attr_owner(struct xdr_stream *xdr, uint32_t *bitmap,
 				XDR_MAX_NETOBJ);
 		if (len <= 0 || nfs_map_name_to_uid(server, p, len, uid) != 0)
 			goto out;
-		dprintk("%s: uid=%d\n", __func__, (int)from_kuid(&init_user_ns, *uid));
+		dprintk("%s: uid=%d\n", __func__, (int)from_kuid(server->nfs_client->cl_net->user_ns, *uid));
 		return NFS_ATTR_FATTR_OWNER;
 	}
 out:
@@ -4024,7 +4024,7 @@ static int decode_attr_group(struct xdr_stream *xdr, uint32_t *bitmap,
 	ssize_t len;
 	char *p;
 
-	*gid = make_kgid(&init_user_ns, -2);
+	*gid = make_kgid(server->nfs_client->cl_net->user_ns, -2);
 	if (unlikely(bitmap[1] & (FATTR4_WORD1_OWNER_GROUP - 1U)))
 		return -EIO;
 	if (!(bitmap[1] & FATTR4_WORD1_OWNER_GROUP))
@@ -4042,7 +4042,7 @@ static int decode_attr_group(struct xdr_stream *xdr, uint32_t *bitmap,
 				XDR_MAX_NETOBJ);
 		if (len <= 0 || nfs_map_group_to_gid(server, p, len, gid) != 0)
 			goto out;
-		dprintk("%s: gid=%d\n", __func__, (int)from_kgid(&init_user_ns, *gid));
+		dprintk("%s: gid=%d\n", __func__, (int)from_kgid(server->nfs_client->cl_net->user_ns, *gid));
 		return NFS_ATTR_FATTR_GROUP;
 	}
 out:
