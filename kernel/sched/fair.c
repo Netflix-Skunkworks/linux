@@ -352,6 +352,20 @@ static inline void list_del_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 	}
 }
 
+static inline void list_add_branch_cfs_rq(struct sched_entity *se, struct rq *rq)
+{
+	struct cfs_rq *cfs_rq;
+
+	for_each_sched_entity(se) {
+		cfs_rq = cfs_rq_of(se);
+		list_add_leaf_cfs_rq(cfs_rq);
+
+		/* If parent is already in the list, we can stop */
+		if (rq->tmp_alone_branch == &rq->leaf_cfs_rq_list)
+			break;
+	}
+}
+
 /* Iterate through all leaf cfs_rq's on a runqueue: */
 #define for_each_leaf_cfs_rq(rq, cfs_rq) \
 	list_for_each_entry_rcu(cfs_rq, &rq->leaf_cfs_rq_list, leaf_cfs_rq_list)
@@ -5128,6 +5142,9 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 
 	if (!se)
 		add_nr_running(rq, 1);
+
+	/* Ensure that all cfs_rq have been added to the list */
+	list_add_branch_cfs_rq(se, rq);
 
 	hrtick_update(rq);
 }
