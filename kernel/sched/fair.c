@@ -4744,6 +4744,16 @@ static inline u64 sched_cfs_bandwidth_slice(void)
 	return (u64)sysctl_sched_cfs_bandwidth_slice * NSEC_PER_USEC;
 }
 
+static inline bool cfs_bandwidth_throttling_on(struct cfs_bandwidth *cfs_b)
+{
+	return cfs_b->quota != RUNTIME_INF || cfs_b->target_idle != 0;
+}
+
+static inline u64 cfs_bandwidth_pct_to_ns(u64 period, unsigned long pct)
+{
+	return div_u64(period * num_online_cpus() * pct, 100) >> FSHIFT;
+}
+
 /*
  * Replenish runtime according to assigned quota. We use sched_clock_cpu
  * directly instead of rq->clock to avoid adding additional synchronization
@@ -4753,19 +4763,59 @@ static inline u64 sched_cfs_bandwidth_slice(void)
  */
 void __refill_cfs_bandwidth_runtime(struct cfs_bandwidth *cfs_b)
 {
+	/* runtimes in nanoseconds */
+	u64 idle_time, target_idle_time, max_runtime, min_runtime, incr_runtime;
+	unsigned long idle_pct;
 	u64 now;
 
 	if (unlikely(cfs_b->quota == RUNTIME_INF))
 		return;
 
-	cfs_b->runtime += cfs_b->quota;
-	cfs_b->runtime = min(cfs_b->runtime, cfs_b->quota + cfs_b->burst);
+	/*
+	 * max_runtime is the maximal possible runtime for given
+	 * target_idle and quota. In other words:
+	 *     max_runtime = min(quota,
+	 *                       total_time * (100% - target_idle))
+	 */
+	max_runtime = min_t(u64, cfs_b->quota,
+			    cfs_bandwidth_pct_to_ns(cfs_b->period,
+						    (100 << FSHIFT) - cfs_b->target_idle));
+	incr_runtime = max_runtime;
 
 	if (cfs_b->target_idle == 0)
-		return;
+		goto out_incr_runtime;
 
 	now = sched_clock_cpu(smp_processor_id());
-	cfs_global_idleness_update(now, cfs_b->period);
+	idle_pct = cfs_global_idleness_update(now, cfs_b->period);
+
+	if (idle_pct < cfs_b->target_idle || max_runtime != cfs_b->prev_runtime) {
+		/*
+		* Throttle runtime if idle_pct is less than target_idle:
+		*     idle_pct < cfs_b->target_idle
+		*
+		* or if the throttling is on in previous period:
+		*     max_runtime != cfs_b->prev_runtime
+		*/
+		idle_time = cfs_bandwidth_pct_to_ns(cfs_b->period, idle_pct);
+		target_idle_time = cfs_bandwidth_pct_to_ns(cfs_b->period,
+							cfs_b->target_idle);
+		/* minimal runtime to avoid starving */
+		min_runtime = max_t(u64, min_cfs_quota_period,
+				cfs_bandwidth_pct_to_ns(cfs_b->period,
+							cfs_b->min_runtime));
+		if (cfs_b->prev_runtime + idle_time < target_idle_time) {
+			incr_runtime = min_runtime;
+		} else {
+			incr_runtime = min(cfs_b->prev_runtime + idle_time -
+				target_idle_time, max_runtime);
+			incr_runtime = max(incr_runtime, min_runtime);
+		}
+	}
+
+out_incr_runtime:
+	cfs_b->prev_runtime = incr_runtime;
+	cfs_b->runtime += incr_runtime;
+	cfs_b->runtime = min(cfs_b->runtime, cfs_b->quota + cfs_b->burst);
 }
 
 static inline struct cfs_bandwidth *tg_cfs_bandwidth(struct task_group *tg)
@@ -4784,7 +4834,7 @@ static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 	/* note: this is a positive sum as runtime_remaining <= 0 */
 	min_amount = target_runtime - cfs_rq->runtime_remaining;
 
-	if (cfs_b->quota == RUNTIME_INF)
+	if (!cfs_bandwidth_throttling_on(cfs_b))
 		amount = min_amount;
 	else {
 		start_cfs_bandwidth(cfs_b);
@@ -5136,7 +5186,7 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 	int throttled;
 
 	/* no need to continue the timer with no bandwidth constraint */
-	if (cfs_b->quota == RUNTIME_INF)
+	if (!cfs_bandwidth_throttling_on(cfs_b))
 		goto out_deactivate;
 
 	throttled = !list_empty(&cfs_b->throttled_cfs_rq);
@@ -5246,7 +5296,7 @@ static void __return_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 		return;
 
 	raw_spin_lock(&cfs_b->lock);
-	if (cfs_b->quota != RUNTIME_INF) {
+	if (cfs_bandwidth_throttling_on(cfs_b)) {
 		cfs_b->runtime += slack_runtime;
 
 		/* we are under rq->lock, defer unthrottling using a timer */
@@ -5289,7 +5339,7 @@ static void do_sched_cfs_slack_timer(struct cfs_bandwidth *cfs_b)
 		return;
 	}
 
-	if (cfs_b->quota != RUNTIME_INF && cfs_b->runtime > slice)
+	if (cfs_bandwidth_throttling_on(cfs_b) && cfs_b->runtime > slice)
 		runtime = cfs_b->runtime;
 
 	raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
@@ -5503,7 +5553,7 @@ static void __maybe_unused update_runtime_enabled(struct rq *rq)
 		struct cfs_rq *cfs_rq = tg->cfs_rq[cpu_of(rq)];
 
 		raw_spin_lock(&cfs_b->lock);
-		cfs_rq->runtime_enabled = cfs_b->quota != RUNTIME_INF;
+		cfs_rq->runtime_enabled = cfs_bandwidth_throttling_on(cfs_b);
 		raw_spin_unlock(&cfs_b->lock);
 	}
 	rcu_read_unlock();
