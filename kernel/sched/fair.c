@@ -5371,6 +5371,18 @@ void init_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
 	cfs_b->period = ns_to_ktime(default_cfs_period());
 	cfs_b->burst = 0;
 
+	if (cfs_b == &root_task_group.cfs_bandwidth) {
+		/* allowed_* values for root tg */
+		cfs_b->allowed_headroom = CFS_BANDWIDTH_MAX_HEADROOM;
+		cfs_b->allowed_tolerance = 0;
+	} else {
+		/* default configured_* values for other tg */
+		cfs_b->configured_headroom = 0;
+		cfs_b->configured_tolerance = CFS_BANDWIDTH_MAX_HEADROOM;
+	}
+	INIT_WORK(&cfs_b->has_tasks_changed_work,
+		  cfs_bandwidth_has_tasks_changed_work);
+
 	INIT_LIST_HEAD(&cfs_b->throttled_cfs_rq);
 	hrtimer_init(&cfs_b->period_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS_PINNED);
 	cfs_b->period_timer.function = sched_cfs_period_timer;

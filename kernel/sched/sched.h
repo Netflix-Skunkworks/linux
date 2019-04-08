@@ -159,6 +159,8 @@ extern void call_trace_sched_update_nr_running(struct rq *rq, int count);
  */
 #define RUNTIME_INF		((u64)~0ULL)
 
+#define CFS_BANDWIDTH_MAX_HEADROOM (100UL << FSHIFT)	/* 100% */
+
 static inline int idle_policy(int policy)
 {
 	return policy == SCHED_IDLE;
@@ -362,6 +364,10 @@ struct rt_rq;
 
 extern struct list_head task_groups;
 
+#ifdef CONFIG_CFS_BANDWIDTH
+extern void cfs_bandwidth_has_tasks_changed_work(struct work_struct *work);
+#endif
+
 struct cfs_bandwidth {
 #ifdef CONFIG_CFS_BANDWIDTH
 	raw_spinlock_t		lock;
@@ -370,6 +376,26 @@ struct cfs_bandwidth {
 	u64			runtime;
 	u64			burst;
 	s64			hierarchical_quota;
+
+	/*
+	 * The following values are all fixed-point. For more information
+	 * about these values, please refer to comments before
+	 * cpu_headroom_update_config().
+	 */
+	/* values configured by user */
+	unsigned long		configured_headroom;
+	unsigned long		configured_tolerance;
+	/* values capped by configuration of parent group */
+	unsigned long		allowed_headroom;
+	unsigned long		allowed_tolerance;
+	/* effective values for cgroups with tasks */
+	unsigned long		effective_headroom;
+	unsigned long		effective_tolerance;
+	/* values calculated for runtime based throttling */
+	unsigned long		target_idle;
+	unsigned long		min_runtime;
+	/* work_struct to adjust settings asynchronously */
+	struct work_struct	has_tasks_changed_work;
 
 	u8			idle;
 	u8			period_active;
@@ -3064,4 +3090,3 @@ extern int preempt_dynamic_mode;
 extern int sched_dynamic_mode(const char *str);
 extern void sched_dynamic_update(int mode);
 #endif
-
