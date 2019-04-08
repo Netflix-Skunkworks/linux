@@ -995,6 +995,10 @@ have placed RT processes into nonroot cgroups during the system boot
 process, and these processes may need to be moved to the root cgroup
 before the cpu controller can be enabled.
 
+Some latency sensitive applications experience high latency when the
+CPU is fully utilized. cpu.headroom knob provides mechanism to reserve
+CPU headroom that are only available to certain applications.
+
 
 CPU Interface Files
 ~~~~~~~~~~~~~~~~~~~
@@ -1046,6 +1050,20 @@ All time durations are in microseconds.
 	which indicates that the group may consume upto $MAX in each
 	$PERIOD duration.  "max" for $MAX indicates no limit.  If only
 	one number is written, $MAX is updated.
+
+  cpu.headroom
+	A read-write two value file which exists on non-root cgroups.
+	The default is "0.00 max".
+
+	The idle CPU headroom claimed by the cgroup. It's is in the
+	following format::
+
+	  $HEADROOM $TOLERANCE
+
+	which indicates that other cgroups should be throttled to
+	yield $HEADROOM % idle CPU. If it is not possible to maintain
+	$HEADROOM % idle CPU, other cgroups will consume at most
+	$TOLERANCE % CPU.
 
   cpu.pressure
 	A read-write nested-keyed file.
