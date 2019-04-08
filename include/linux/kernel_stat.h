@@ -115,4 +115,6 @@ extern void account_process_tick(struct task_struct *, int user);
 
 extern void account_idle_ticks(unsigned long ticks);
 
+u64 get_idle_time(struct kernel_cpustat *kcs, int cpu);
+
 #endif /* _LINUX_KERNEL_STAT_H */

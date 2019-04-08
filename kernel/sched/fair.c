@@ -134,6 +134,62 @@ int __weak arch_asym_cpu_priority(int cpu)
  * (default: 5 msec, units: microseconds)
  */
 unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
+
+/* tracking global idlenesss for cpu.headroom */
+struct cfs_global_idleness {
+	u64		prev_total_idle_time;
+	u64		prev_timestamp;
+	unsigned long	idle_percent; /* fixed-point */
+	raw_spinlock_t	lock;
+};
+
+static struct cfs_global_idleness global_idleness;
+
+/*
+ * Calculate global idleness in fixed-point percentage since previous call
+ * of the function. If the time between previous call of the function is
+ * called and @now is shorter than @period, return idleness calculated in
+ * previous call.
+ */
+static unsigned long cfs_global_idleness_update(u64 now, u64 period)
+{
+	u64 prev_timestamp, total_idle_time, delta_idle_time;
+	unsigned long idle_percent;
+	int cpu;
+
+	/*
+	 * Fastpath: if idleness has been updated within the last period
+	 * of time, just return previous idleness.
+	 */
+	prev_timestamp = READ_ONCE(global_idleness.prev_timestamp);
+	if (prev_timestamp + period >= now)
+		return READ_ONCE(global_idleness.idle_percent);
+
+	raw_spin_lock_irq(&global_idleness.lock);
+	if (global_idleness.prev_timestamp + period >= now) {
+		idle_percent = global_idleness.idle_percent;
+		goto out;
+	}
+
+	/* Slowpath: calculate the average idleness since prev_timestamp */
+	total_idle_time = 0;
+	for_each_online_cpu(cpu)
+		total_idle_time += get_idle_time(&kcpustat_cpu(cpu), cpu);
+
+	delta_idle_time = total_idle_time -
+		global_idleness.prev_total_idle_time;
+
+	idle_percent = div64_u64((delta_idle_time << FSHIFT) * 100,
+				 num_online_cpus() *
+				 (now - global_idleness.prev_timestamp));
+
+	WRITE_ONCE(global_idleness.prev_total_idle_time, total_idle_time);
+	WRITE_ONCE(global_idleness.prev_timestamp, now);
+	WRITE_ONCE(global_idleness.idle_percent, idle_percent);
+out:
+	raw_spin_unlock_irq(&global_idleness.lock);
+	return idle_percent;
+}
 #endif
 
 static inline void update_load_add(struct load_weight *lw, unsigned long inc)
@@ -4697,11 +4753,19 @@ static inline u64 sched_cfs_bandwidth_slice(void)
  */
 void __refill_cfs_bandwidth_runtime(struct cfs_bandwidth *cfs_b)
 {
+	u64 now;
+
 	if (unlikely(cfs_b->quota == RUNTIME_INF))
 		return;
 
 	cfs_b->runtime += cfs_b->quota;
 	cfs_b->runtime = min(cfs_b->runtime, cfs_b->quota + cfs_b->burst);
+
+	if (cfs_b->target_idle == 0)
+		return;
+
+	now = sched_clock_cpu(smp_processor_id());
+	cfs_global_idleness_update(now, cfs_b->period);
 }
 
 static inline struct cfs_bandwidth *tg_cfs_bandwidth(struct task_group *tg)
@@ -11757,6 +11821,9 @@ __init void init_sched_fair_class(void)
 #endif
 #endif /* SMP */
 
+#ifdef CONFIG_CFS_BANDWIDTH
+	raw_spin_lock_init(&global_idleness.lock);
+#endif
 }
 
 /*
