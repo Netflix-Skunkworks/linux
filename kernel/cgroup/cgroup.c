@@ -4303,6 +4303,43 @@ void cgroup_file_notify(struct cgroup_file *cfile)
 }
 
 /**
+ * cgroup_parse_percentage - parse percentage number
+ * @tok: input string contains the token. Valid values are "00.00" to
+ *       "100.00", or "max"
+ * @base: number "1" in desired output scale
+ *
+ * Returns:
+ *    @base * 100 for "max";
+ *    @base * <0.00 to 100.00> for valid inputs;
+ *    -EINVAL for invalid input.
+ */
+long cgroup_parse_percentage(char *tok, unsigned long base)
+{
+	unsigned long val_int, val_frag;
+
+	if (strcmp(tok, "max") == 0) {
+		return base * 100;
+	} else if (sscanf(tok, "%lu.%02lu", &val_int, &val_frag) == 2) {
+		/* xx.1 yields val_frag = 1, while it should be 10 */
+		if (val_frag < 10 && strstr(tok, ".0") == NULL)
+			val_frag *= 10;
+		goto calculate_output;
+	} else if (sscanf(tok, "%lu", &val_int) == 1) {
+		val_frag = 0;
+		goto calculate_output;
+	} else {
+		return -EINVAL;
+	}
+
+calculate_output:
+	if (val_int > 100 || (val_int == 100 && val_frag > 0))
+		return -EINVAL;
+
+	/* round up val_frag by 0.5, to avoid repeated rounding down */
+	return (val_int * base) + div_u64((val_frag * 10 + 5) * base, 1000);
+}
+
+/**
  * css_next_child - find the next child of a given css
  * @pos: the current position (%NULL to initiate traversal)
  * @parent: css whose children to walk
