@@ -204,6 +204,7 @@ static u16 have_fork_callback __read_mostly;
 static u16 have_exit_callback __read_mostly;
 static u16 have_release_callback __read_mostly;
 static u16 have_canfork_callback __read_mostly;
+static u16 have_has_tasks_changed_callback __read_mostly;
 
 /* cgroup namespace for init task */
 struct cgroup_namespace init_cgroup_ns = {
@@ -818,8 +819,11 @@ static bool css_set_populated(struct css_set *cset)
  */
 static void cgroup_update_populated(struct cgroup *cgrp, bool populated)
 {
+	struct cgroup *orig_cgrp = cgrp;
 	struct cgroup *child = NULL;
 	int adj = populated ? 1 : -1;
+	struct cgroup_subsys *ss;
+	int ssid;
 
 	lockdep_assert_held(&css_set_lock);
 
@@ -846,6 +850,14 @@ static void cgroup_update_populated(struct cgroup *cgrp, bool populated)
 		child = cgrp;
 		cgrp = cgroup_parent(cgrp);
 	} while (cgrp);
+
+	do_each_subsys_mask(ss, ssid, have_has_tasks_changed_callback) {
+		struct cgroup_subsys_state *css;
+
+		css = cgroup_css(orig_cgrp, ss);
+		if (css)
+			ss->css_has_tasks_changed(css, populated);
+	} while_each_subsys_mask();
 }
 
 /**
@@ -5776,6 +5788,8 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
 	have_exit_callback |= (bool)ss->exit << ss->id;
 	have_release_callback |= (bool)ss->release << ss->id;
 	have_canfork_callback |= (bool)ss->can_fork << ss->id;
+	have_has_tasks_changed_callback |=
+		(bool)ss->css_has_tasks_changed << ss->id;
 
 	/* At system boot, before all subsystems have been
 	 * registered, no tasks have been forked, so we don't
