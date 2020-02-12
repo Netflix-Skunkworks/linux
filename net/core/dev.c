@@ -9753,6 +9753,8 @@ static void __net_exit default_device_exit_batch(struct list_head *net_list)
 	 * will run in the rtnl_unlock() at the end of
 	 * default_device_exit_batch.
 	 */
+
+	pause_addrconf_verify_work();
 	rtnl_lock_unregistering(net_list);
 	list_for_each_entry(net, net_list, exit_list) {
 		for_each_netdev_reverse(net, dev) {
@@ -9764,6 +9766,7 @@ static void __net_exit default_device_exit_batch(struct list_head *net_list)
 	}
 	unregister_netdevice_many(&dev_kill_list);
 	rtnl_unlock();
+	unpause_addrconf_verify_work();
 }
 
 static struct pernet_operations __net_initdata default_device_ops = {

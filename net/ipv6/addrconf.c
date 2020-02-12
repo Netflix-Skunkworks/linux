@@ -162,6 +162,7 @@ static void addrconf_verify_work(struct work_struct *);
 
 static struct workqueue_struct *addrconf_wq;
 static DECLARE_DELAYED_WORK(addr_chk_work, addrconf_verify_work);
+static atomic_t addr_chk_work_paused = ATOMIC_INIT(0);
 
 static void addrconf_join_anycast(struct inet6_ifaddr *ifp);
 static void addrconf_leave_anycast(struct inet6_ifaddr *ifp);
@@ -4457,7 +4458,10 @@ restart:
 
 	pr_debug("now = %lu, schedule = %lu, rounded schedule = %lu => %lu\n",
 		 now, next, next_sec, next_sched);
-	mod_delayed_work(addrconf_wq, &addr_chk_work, next_sched - now);
+
+	if (!atomic_read(&addr_chk_work_paused))
+		mod_delayed_work(addrconf_wq, &addr_chk_work, next_sched - now);
+
 	rcu_read_unlock_bh();
 }
 
@@ -4470,7 +4474,26 @@ static void addrconf_verify_work(struct work_struct *w)
 
 static void addrconf_verify(void)
 {
-	mod_delayed_work(addrconf_wq, &addr_chk_work, 0);
+	if (!atomic_read(&addr_chk_work_paused))
+		mod_delayed_work(addrconf_wq, &addr_chk_work, 0);
+}
+
+/*
+ * This can get into a starvation situation where addrconf never runs,
+ * because the pause value never goes back to 0.
+ *
+ * For now, we'll ignore that.
+ */
+void pause_addrconf_verify_work(void)
+{
+	if (atomic_inc_return(&addr_chk_work_paused) == 1)
+		drain_workqueue(addrconf_wq);
+}
+
+void unpause_addrconf_verify_work(void)
+{
+	if (atomic_dec_and_test(&addr_chk_work_paused))
+		mod_delayed_work(addrconf_wq, &addr_chk_work, 0);
 }
 
 static struct in6_addr *extract_addr(struct nlattr *addr, struct nlattr *local,

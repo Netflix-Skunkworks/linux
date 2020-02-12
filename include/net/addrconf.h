@@ -487,4 +487,7 @@ int if6_proc_init(void);
 void if6_proc_exit(void);
 #endif
 
+void pause_addrconf_verify_work(void);
+void unpause_addrconf_verify_work(void);
+
 #endif
