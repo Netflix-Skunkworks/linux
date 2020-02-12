@@ -4355,7 +4355,7 @@ static void addrconf_verify_rtnl(void)
 
 	rcu_read_lock_bh();
 	now = jiffies;
-	next = round_jiffies_up(now + ADDR_CHECK_FREQUENCY);
+	next = round_jiffies_up(now + init_net.ipv6.sysctl.addr_check_frequency);
 
 	cancel_delayed_work(&addr_chk_work);
 
@@ -6736,6 +6736,8 @@ int __init addrconf_init(void)
 {
 	struct inet6_dev *idev;
 	int i, err;
+
+	init_net.ipv6.sysctl.addr_check_frequency = ADDR_CHECK_FREQUENCY;
 
 	err = ipv6_addr_label_init();
 	if (err < 0) {

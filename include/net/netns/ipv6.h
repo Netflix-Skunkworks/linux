@@ -45,6 +45,7 @@ struct netns_sysctl_ipv6 {
 	int max_dst_opts_len;
 	int max_hbh_opts_len;
 	int seg6_flowlabel;
+	int addr_check_frequency;
 };
 
 struct netns_ipv6 {
