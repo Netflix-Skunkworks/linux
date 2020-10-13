@@ -463,7 +463,7 @@ nfs_idmap_new(struct nfs_client *clp)
 		return -ENOMEM;
 
 	mutex_init(&idmap->idmap_mutex);
-	idmap->user_ns = get_user_ns(clp->cl_rpcclient->cl_cred->user_ns);
+	idmap->user_ns = get_user_ns(clp->cl_net->user_ns);
 
 	rpc_init_pipe_dir_object(&idmap->idmap_pdo,
 			&nfs_idmap_pipe_dir_object_ops,
