@@ -38,7 +38,7 @@
 
 #include <linux/uidgid.h>
 #include <uapi/linux/nfs_idmap.h>
-
+#include <linux/user_namespace.h>
 
 /* Forward declaration to make this header independent of others */
 struct nfs_client;
@@ -50,6 +50,7 @@ int nfs_idmap_init(void);
 void nfs_idmap_quit(void);
 int nfs_idmap_new(struct nfs_client *);
 void nfs_idmap_delete(struct nfs_client *);
+struct user_namespace *idmap_userns(const struct idmap *idmap);
 
 void nfs_fattr_init_names(struct nfs_fattr *fattr,
 		struct nfs4_string *owner_name,

@@ -73,7 +73,7 @@ struct idmap {
 	struct user_namespace	*user_ns;
 };
 
-static struct user_namespace *idmap_userns(const struct idmap *idmap)
+struct user_namespace *idmap_userns(const struct idmap *idmap)
 {
 	if (idmap && idmap->user_ns)
 		return idmap->user_ns;

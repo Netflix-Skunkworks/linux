@@ -1151,7 +1151,19 @@ struct nfs_server *nfs4_create_server(struct fs_context *fc)
 	if (!server)
 		return ERR_PTR(-ENOMEM);
 
-	server->cred = get_cred(current_cred());
+	/*
+	 * current_cred() must have CAP_SYS_ADMIN in init_user_ns. All non
+	 * init user namespaces cannot mount NFS, but the fs_context
+	 * can be created in any user namespace.
+	 */
+	if (fc->cred->user_ns != &init_user_ns) {
+		dprintk("%s: Using creds from non-init userns\n", __func__);
+	} else if (fc->cred != current_cred()) {
+		dprintk("%s: Using creds from fs_context which are different than current_creds\n",
+			__func__);
+	}
+
+	server->cred = get_cred(fc->cred);
 
 	auth_probe = ctx->auth_info.flavor_len < 1;
 
@@ -1163,6 +1175,19 @@ struct nfs_server *nfs4_create_server(struct fs_context *fc)
 	error = nfs4_server_common_setup(server, ctx->mntfh, auth_probe);
 	if (error < 0)
 		goto error;
+
+	/*
+	 * nfs4idmap is not fully isolated by user namespaces. It is currently
+	 * only network namespace aware. If upcalls never happen, we do not
+	 * need to worry as nfs_client instances aren't shared between
+	 * user namespaces.
+	 */
+	if (idmap_userns(server->nfs_client->cl_idmap) != &init_user_ns &&
+		!(server->caps & NFS_CAP_UIDGID_NOMAP)) {
+		error = -EINVAL;
+		errorf(fc, "Mount credentials are from non init user namespace and ID mapping is enabled. This is not allowed.");
+		goto error;
+	}
 
 	return server;
 
