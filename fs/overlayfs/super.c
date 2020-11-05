@@ -592,6 +592,9 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 		}
 	}
 
+	/* Sargun: Always enable volatile */
+	config->ovl_volatile = true;
+
 	/* Workdir/index are useless in non-upper mount */
 	if (!config->upperdir) {
 		if (config->workdir) {
