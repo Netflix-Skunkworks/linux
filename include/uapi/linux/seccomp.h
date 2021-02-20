@@ -70,6 +70,16 @@ struct seccomp_notif_sizes {
 	__u16 seccomp_data;
 };
 
+/*
+ * Valid flags for struct seccomp_notif
+ *
+ * SECCOMP_USER_NOTIF_FLAG_WAIT_KILLABLE
+ *
+ * Prevent the notifying task from being interrupted by non-fatal, unmasked
+ * signals.
+ */
+#define SECCOMP_USER_NOTIF_FLAG_WAIT_KILLABLE (1UL << 0)
+
 struct seccomp_notif {
 	__u64 id;
 	__u32 pid;
