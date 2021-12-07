@@ -2504,6 +2504,7 @@ static struct ceph_msg *create_request_message(struct ceph_mds_client *mdsc,
 	u16 releases;
 	void *p, *end;
 	int ret;
+	struct inode *inode;
 
 	ret = set_request_path_attr(req->r_inode, req->r_dentry,
 			      req->r_parent, req->r_path1, req->r_ino1.ino,
@@ -2553,8 +2554,9 @@ static struct ceph_msg *create_request_message(struct ceph_mds_client *mdsc,
 
 	head->mdsmap_epoch = cpu_to_le32(mdsc->mdsmap->m_epoch);
 	head->op = cpu_to_le32(req->r_op);
-	head->caller_uid = cpu_to_le32(from_kuid(&init_user_ns, req->r_uid));
-	head->caller_gid = cpu_to_le32(from_kgid(&init_user_ns, req->r_gid));
+	inode = req->r_inode ? req->r_inode : d_inode(req->r_dentry);
+	head->caller_uid = cpu_to_le32(from_kuid(inode->i_sb->s_user_ns, req->r_uid));
+	head->caller_gid = cpu_to_le32(from_kgid(inode->i_sb->s_user_ns, req->r_gid));
 	head->ino = cpu_to_le64(req->r_deleg_ino);
 	head->args = req->r_args;
 
@@ -2568,7 +2570,7 @@ static struct ceph_msg *create_request_message(struct ceph_mds_client *mdsc,
 	releases = 0;
 	if (req->r_inode_drop)
 		releases += ceph_encode_inode_release(&p,
-		      req->r_inode ? req->r_inode : d_inode(req->r_dentry),
+		      inode,
 		      mds, req->r_inode_drop, req->r_inode_unless,
 		      req->r_op == CEPH_MDS_OP_READDIR);
 	if (req->r_dentry_drop)

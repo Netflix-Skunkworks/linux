@@ -1236,7 +1236,7 @@ struct cap_msg_args {
 		      4 + 8 + 4 + 4 + 8 + 4 + 4 + 4 + 8 + 8 + 4)
 
 /* Marshal up the cap msg to the MDS */
-static void encode_cap_msg(struct ceph_msg *msg, struct cap_msg_args *arg)
+static void encode_cap_msg(struct ceph_msg *msg, struct cap_msg_args *arg, struct inode *inode)
 {
 	struct ceph_mds_caps *fc;
 	void *p;
@@ -1274,8 +1274,8 @@ static void encode_cap_msg(struct ceph_msg *msg, struct cap_msg_args *arg)
 	ceph_encode_timespec64(&fc->ctime, &arg->ctime);
 	fc->time_warp_seq = cpu_to_le32(arg->time_warp_seq);
 
-	fc->uid = cpu_to_le32(from_kuid(&init_user_ns, arg->uid));
-	fc->gid = cpu_to_le32(from_kgid(&init_user_ns, arg->gid));
+	fc->uid = cpu_to_le32(from_kuid(inode->i_sb->s_user_ns, arg->uid));
+	fc->gid = cpu_to_le32(from_kgid(inode->i_sb->s_user_ns, arg->gid));
 	fc->mode = cpu_to_le32(arg->mode);
 
 	fc->xattr_version = cpu_to_le64(arg->xattr_version);
@@ -1465,7 +1465,7 @@ static void __send_cap(struct cap_msg_args *arg, struct ceph_inode_info *ci)
 		return;
 	}
 
-	encode_cap_msg(msg, arg);
+	encode_cap_msg(msg, arg, inode);
 	ceph_con_send(&arg->session->s_con, msg);
 	ceph_buffer_put(arg->old_xattr_buf);
 	if (arg->wake)
@@ -1521,7 +1521,7 @@ static inline int __send_flush_snap(struct inode *inode,
 	arg.flags = 0;
 	arg.wake = false;
 
-	encode_cap_msg(msg, &arg);
+	encode_cap_msg(msg, &arg, inode);
 	ceph_con_send(&arg.session->s_con, msg);
 	return 0;
 }
@@ -3331,12 +3331,12 @@ static void handle_cap_grant(struct inode *inode,
 	if ((newcaps & CEPH_CAP_AUTH_SHARED) &&
 	    (extra_info->issued & CEPH_CAP_AUTH_EXCL) == 0) {
 		inode->i_mode = le32_to_cpu(grant->mode);
-		inode->i_uid = make_kuid(&init_user_ns, le32_to_cpu(grant->uid));
-		inode->i_gid = make_kgid(&init_user_ns, le32_to_cpu(grant->gid));
+		inode->i_uid = make_kuid(inode->i_sb->s_user_ns, le32_to_cpu(grant->uid));
+		inode->i_gid = make_kgid(inode->i_sb->s_user_ns, le32_to_cpu(grant->gid));
 		ci->i_btime = extra_info->btime;
 		dout("%p mode 0%o uid.gid %d.%d\n", inode, inode->i_mode,
-		     from_kuid(&init_user_ns, inode->i_uid),
-		     from_kgid(&init_user_ns, inode->i_gid));
+		     from_kuid(inode->i_sb->s_user_ns, inode->i_uid),
+		     from_kgid(inode->i_sb->s_user_ns, inode->i_gid));
 	}
 
 	if ((newcaps & CEPH_CAP_LINK_SHARED) &&
