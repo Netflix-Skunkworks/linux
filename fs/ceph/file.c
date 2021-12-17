@@ -607,8 +607,8 @@ static int ceph_finish_async_create(struct inode *dir, struct dentry *dentry,
 	in.truncate_seq = cpu_to_le32(1);
 	in.truncate_size = cpu_to_le64(-1ULL);
 	in.xattr_version = cpu_to_le64(1);
-	in.uid = cpu_to_le32(from_kuid(&init_user_ns, current_fsuid()));
-	in.gid = cpu_to_le32(from_kgid(&init_user_ns, dir->i_mode & S_ISGID ?
+	in.uid = cpu_to_le32(from_kuid(inode->i_sb->s_user_ns, current_fsuid()));
+	in.gid = cpu_to_le32(from_kgid(inode->i_sb->s_user_ns, dir->i_mode & S_ISGID ?
 				dir->i_gid : current_fsgid()));
 	in.nlink = cpu_to_le32(1);
 	in.max_size = cpu_to_le64(lo->stripe_unit);

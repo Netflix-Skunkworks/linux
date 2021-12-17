@@ -902,8 +902,17 @@ static void __register_request(struct ceph_mds_client *mdsc,
 	ceph_mdsc_get_request(req);
 	insert_request(&mdsc->request_tree, req);
 
-	req->r_uid = current_fsuid();
-	req->r_gid = current_fsgid();
+	uid_t orig_uid = from_kuid(current_user_ns(), current_uid());
+	gid_t orig_gid = from_kgid(current_user_ns(), current_gid());
+	req->r_uid = make_kuid(&init_user_ns, orig_uid);
+	req->r_gid = make_kgid(&init_user_ns, orig_gid);
+
+	// // KYLE: Is there a better way to get the "relative" KUID?
+	// uid_t orig_uid = from_kuid(current_user_ns(), current_uid());
+	// gid_t orig_gid = from_kgid(current_user_ns(), current_gid());
+	// req->r_uid = make_kuid(&init_user_ns, orig_uid);
+	// req->r_gid = make_kgid(&init_user_ns, orig_gid);
+	// dout("KYLE req uid/gid %d %d\n", req->r_uid.val, req->r_gid.val);
 
 	if (mdsc->oldest_tid == 0 && req->r_op != CEPH_MDS_OP_SETFILELOCK)
 		mdsc->oldest_tid = req->r_tid;

@@ -833,11 +833,11 @@ int ceph_fill_inode(struct inode *inode, struct page *locked_page,
 	if ((new_version || (new_issued & CEPH_CAP_AUTH_SHARED)) &&
 	    (issued & CEPH_CAP_AUTH_EXCL) == 0) {
 		inode->i_mode = le32_to_cpu(info->mode);
-		inode->i_uid = make_kuid(&init_user_ns, le32_to_cpu(info->uid));
-		inode->i_gid = make_kgid(&init_user_ns, le32_to_cpu(info->gid));
+		inode->i_uid = make_kuid(inode->i_sb->s_user_ns, le32_to_cpu(info->uid));
+		inode->i_gid = make_kgid(inode->i_sb->s_user_ns, le32_to_cpu(info->gid));
 		dout("%p mode 0%o uid.gid %d.%d\n", inode, inode->i_mode,
-		     from_kuid(&init_user_ns, inode->i_uid),
-		     from_kgid(&init_user_ns, inode->i_gid));
+                     inode->i_uid.val,
+                     inode->i_gid.val);
 		ceph_decode_timespec64(&ci->i_btime, &iinfo->btime);
 		ceph_decode_timespec64(&ci->i_snap_btime, &iinfo->snap_btime);
 	}
@@ -968,6 +968,8 @@ int ceph_fill_inode(struct inode *inode, struct page *locked_page,
 		inode->i_link = ci->i_symlink;
 		break;
 	case S_IFDIR:
+		inode->i_uid = make_kuid(inode->i_sb->s_user_ns, le32_to_cpu(info->uid));
+		inode->i_gid = make_kgid(inode->i_sb->s_user_ns, le32_to_cpu(info->gid));
 		inode->i_op = &ceph_dir_iops;
 		inode->i_fop = &ceph_dir_fops;
 		break;
@@ -2073,15 +2075,15 @@ int __ceph_setattr(struct inode *inode, struct iattr *attr)
 
 	if (ia_valid & ATTR_UID) {
 		dout("setattr %p uid %d -> %d\n", inode,
-		     from_kuid(&init_user_ns, inode->i_uid),
-		     from_kuid(&init_user_ns, attr->ia_uid));
+		     from_kuid(inode->i_sb->s_user_ns, inode->i_uid),
+		     from_kuid(inode->i_sb->s_user_ns, attr->ia_uid));
 		if (issued & CEPH_CAP_AUTH_EXCL) {
 			inode->i_uid = attr->ia_uid;
 			dirtied |= CEPH_CAP_AUTH_EXCL;
 		} else if ((issued & CEPH_CAP_AUTH_SHARED) == 0 ||
 			   !uid_eq(attr->ia_uid, inode->i_uid)) {
 			req->r_args.setattr.uid = cpu_to_le32(
-				from_kuid(&init_user_ns, attr->ia_uid));
+				from_kuid(inode->i_sb->s_user_ns, attr->ia_uid));
 			mask |= CEPH_SETATTR_UID;
 			release |= CEPH_CAP_AUTH_SHARED;
 		}
@@ -2096,7 +2098,7 @@ int __ceph_setattr(struct inode *inode, struct iattr *attr)
 		} else if ((issued & CEPH_CAP_AUTH_SHARED) == 0 ||
 			   !gid_eq(attr->ia_gid, inode->i_gid)) {
 			req->r_args.setattr.gid = cpu_to_le32(
-				from_kgid(&init_user_ns, attr->ia_gid));
+				from_kgid(inode->i_sb->s_user_ns, attr->ia_gid));
 			mask |= CEPH_SETATTR_GID;
 			release |= CEPH_CAP_AUTH_SHARED;
 		}
