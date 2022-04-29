@@ -59,6 +59,8 @@
 #define SKIP(s, ...)	XFAIL(s, ##__VA_ARGS__)
 #endif
 
+#define MIN(X, Y) ((X) < (Y) ? (X) : (Y))
+
 #ifndef PR_SET_PTRACER
 # define PR_SET_PTRACER 0x59616d61
 #endif
@@ -262,6 +264,10 @@ struct seccomp_notif_addfd_big {
 
 #ifndef SECCOMP_FILTER_FLAG_TSYNC_ESRCH
 #define SECCOMP_FILTER_FLAG_TSYNC_ESRCH (1UL << 4)
+#endif
+
+#ifndef SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV
+#define SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV (1UL << 5)
 #endif
 
 #ifndef seccomp
@@ -4150,7 +4156,7 @@ TEST(user_notification_addfd_rlimit)
 
 static char get_proc_stat(int pid)
 {
-	char proc_path[100] = {0};
+	char proc_path[100] = { 0 };
 	char *line = NULL;
 	size_t len = 0;
 	ssize_t nread;
@@ -4161,8 +4167,8 @@ static char get_proc_stat(int pid)
 	snprintf(proc_path, sizeof(proc_path), "/proc/%d/stat", pid);
 	f = fopen(proc_path, "r");
 	if (f == NULL)
-		ksft_exit_fail_msg("%s - Could not open %s\n",
-				   strerror(errno), proc_path);
+		ksft_exit_fail_msg("%s - Could not open %s\n", strerror(errno),
+				   proc_path);
 
 	for (i = 0; i < 3; i++) {
 		nread = getdelim(&line, &len, ' ', f);
@@ -4178,13 +4184,175 @@ static char get_proc_stat(int pid)
 	return status;
 }
 
-TEST(user_notification_fifo)
+/* Returns -1 if not in syscall (running or blocked) */
+static long get_proc_syscall(int pid)
 {
+	char proc_path[100] = { 0 };
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t nread;
+	long ret = -1;
+	FILE *f;
+
+	snprintf(proc_path, sizeof(proc_path), "/proc/%d/syscall", pid);
+	f = fopen(proc_path, "r");
+	if (f == NULL)
+		ksft_exit_fail_msg("%s - Could not open %s\n", strerror(errno),
+				   proc_path);
+
+	nread = getdelim(&line, &len, ' ', f);
+	if (nread <= 0)
+		ksft_exit_fail_msg("Failed to read status: %s\n",
+				   strerror(errno));
+
+	if (!strncmp("running", line, MIN(7, nread)))
+		ret = strtol(line, NULL, 16);
+
+	free(line);
+	fclose(f);
+
+	return ret;
+}
+
+TEST(user_notification_wait_killable_pre_notification)
+{
+	struct sigaction new_action = {
+		.sa_handler = signal_handler,
+	};
+	int listener, status, sk_pair[2];
+	pid_t pid;
+	long ret;
+	char c;
+	/* 100 ms */
+	struct timespec delay = { .tv_nsec = 100000000 };
+
+	ASSERT_EQ(sigemptyset(&new_action.sa_mask), 0);
+
+	ret = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+	ASSERT_EQ(0, ret) {
+		TH_LOG("Kernel does not support PR_SET_NO_NEW_PRIVS!");
+	}
+
+	ASSERT_EQ(socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, sk_pair), 0);
+
+
+	listener = user_notif_syscall(__NR_getppid,
+				      SECCOMP_FILTER_FLAG_NEW_LISTENER |
+				      SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV);
+	ASSERT_GE(listener, 0);
+
+	/*
+	 * Check that we can kill the process with SIGUSR1 prior to receiving
+	 * the notification. SIGUSR1 is wired up to a custom signal handler,
+	 * and make sure it gets called.
+	 */
+	pid = fork();
+	ASSERT_GE(pid, 0);
+
+	if (pid == 0) {
+		close(sk_pair[0]);
+		handled = sk_pair[1];
+
+		/* Setup the sigaction without SA_RESTART */
+		if (sigaction(SIGUSR1, &new_action, NULL)) {
+			perror("sigaction");
+			exit(1);
+		}
+
+		ret = syscall(__NR_getppid);
+		exit(ret != -1 || errno != EINTR);
+	}
+
+	while (get_proc_syscall(pid) != __NR_getppid &&
+	       get_proc_stat(pid) != 'S')
+		nanosleep(&delay, NULL);
+
+	EXPECT_EQ(kill(pid, SIGUSR1), 0);
+
+	EXPECT_EQ(waitpid(pid, &status, 0), pid);
+	EXPECT_EQ(true, WIFEXITED(status));
+	EXPECT_EQ(0, WEXITSTATUS(status));
+
+	EXPECT_EQ(read(sk_pair[0], &c, 1), 1);
+}
+
+TEST(user_notification_wait_killable)
+{
+	struct sigaction new_action = {
+		.sa_handler = signal_handler,
+	};
 	struct seccomp_notif_resp resp = {};
 	struct seccomp_notif req = {};
-	int i, status, listener;
-	pid_t pid, pids[3];
-	__u64 baseid;
+	int listener, status, sk_pair[2];
+	pid_t pid;
+	long ret;
+	char c;
+	/* 100 ms */
+	struct timespec delay = { .tv_nsec = 100000000 };
+
+	ASSERT_EQ(sigemptyset(&new_action.sa_mask), 0);
+
+	ret = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+	ASSERT_EQ(0, ret) {
+		TH_LOG("Kernel does not support PR_SET_NO_NEW_PRIVS!");
+	}
+
+	ASSERT_EQ(socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, sk_pair), 0);
+
+	listener = user_notif_syscall(__NR_getppid,
+				      SECCOMP_FILTER_FLAG_NEW_LISTENER |
+				      SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV);
+	ASSERT_GE(listener, 0);
+
+	pid = fork();
+	ASSERT_GE(pid, 0);
+
+	if (pid == 0) {
+		close(sk_pair[0]);
+		handled = sk_pair[1];
+
+		/* Setup the sigaction without SA_RESTART */
+		if (sigaction(SIGUSR1, &new_action, NULL)) {
+			perror("sigaction");
+			exit(1);
+		}
+
+		/* Make sure that the syscall is completed (no EINTR) */
+		ret = syscall(__NR_getppid);
+		exit(ret != USER_NOTIF_MAGIC);
+	}
+
+	while (get_proc_syscall(pid) != __NR_getppid &&
+	       get_proc_stat(pid) != 'S')
+		nanosleep(&delay, NULL);
+
+	EXPECT_EQ(ioctl(listener, SECCOMP_IOCTL_NOTIF_RECV, &req), 0);
+	/* Kill the process to make sure it enters the wait_killable state */
+	EXPECT_EQ(kill(pid, SIGUSR1), 0);
+
+	/* TASK_KILLABLE is considered D (Disk Sleep) state */
+	while (get_proc_stat(pid) != 'D')
+		nanosleep(&delay, NULL);
+
+	resp.id = req.id;
+	resp.val = USER_NOTIF_MAGIC;
+	EXPECT_EQ(ioctl(listener, SECCOMP_IOCTL_NOTIF_SEND, &resp), 0);
+
+	/*
+	 * Make sure that the signal handler does get called once we're back in
+	 * userspace.
+	 */
+	EXPECT_EQ(read(sk_pair[0], &c, 1), 1);
+	EXPECT_EQ(waitpid(pid, &status, 0), pid);
+	EXPECT_EQ(true, WIFEXITED(status));
+	EXPECT_EQ(0, WEXITSTATUS(status));
+}
+
+TEST(user_notification_wait_killable_fatal)
+{
+	struct seccomp_notif req = {};
+	int listener, status;
+	pid_t pid;
 	long ret;
 	/* 100 ms */
 	struct timespec delay = { .tv_nsec = 100000000 };
@@ -4194,67 +4362,30 @@ TEST(user_notification_fifo)
 		TH_LOG("Kernel does not support PR_SET_NO_NEW_PRIVS!");
 	}
 
-	/* Setup a listener */
 	listener = user_notif_syscall(__NR_getppid,
-				      SECCOMP_FILTER_FLAG_NEW_LISTENER);
+				      SECCOMP_FILTER_FLAG_NEW_LISTENER |
+				      SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV);
 	ASSERT_GE(listener, 0);
 
 	pid = fork();
 	ASSERT_GE(pid, 0);
 
 	if (pid == 0) {
-		ret = syscall(__NR_getppid);
-		exit(ret != USER_NOTIF_MAGIC);
+		/* This should never complete */
+		syscall(__NR_getppid);
+		exit(1);
 	}
+
+	while (get_proc_stat(pid) != 'S')
+		nanosleep(&delay, NULL);
 
 	EXPECT_EQ(ioctl(listener, SECCOMP_IOCTL_NOTIF_RECV, &req), 0);
-	baseid = req.id + 1;
-
-	resp.id = req.id;
-	resp.error = 0;
-	resp.val = USER_NOTIF_MAGIC;
-
-	/* check that we make sure flags == 0 */
-	EXPECT_EQ(ioctl(listener, SECCOMP_IOCTL_NOTIF_SEND, &resp), 0);
+	/* Kill the process with a fatal signal */
+	EXPECT_EQ(kill(pid, SIGTERM), 0);
 
 	EXPECT_EQ(waitpid(pid, &status, 0), pid);
-	EXPECT_EQ(true, WIFEXITED(status));
-	EXPECT_EQ(0, WEXITSTATUS(status));
-
-	/* Start children, and them generate notifications */
-	for (i = 0; i < ARRAY_SIZE(pids); i++) {
-		pid = fork();
-		if (pid == 0) {
-			ret = syscall(__NR_getppid);
-			exit(ret != USER_NOTIF_MAGIC);
-		}
-		pids[i] = pid;
-	}
-
-	/* This spins until all of the children are sleeping */
-restart_wait:
-	for (i = 0; i < ARRAY_SIZE(pids); i++) {
-		if (get_proc_stat(pids[i]) != 'S') {
-			nanosleep(&delay, NULL);
-			goto restart_wait;
-		}
-	}
-
-	/* Read the notifications in order (and respond) */
-	for (i = 0; i < ARRAY_SIZE(pids); i++) {
-		memset(&req, 0, sizeof(req));
-		EXPECT_EQ(ioctl(listener, SECCOMP_IOCTL_NOTIF_RECV, &req), 0);
-		EXPECT_EQ(req.id, baseid + i);
-		resp.id = req.id;
-		EXPECT_EQ(ioctl(listener, SECCOMP_IOCTL_NOTIF_SEND, &resp), 0);
-	}
-
-	/* Make sure notifications were received */
-	for (i = 0; i < ARRAY_SIZE(pids); i++) {
-		EXPECT_EQ(waitpid(pids[i], &status, 0), pids[i]);
-		EXPECT_EQ(true, WIFEXITED(status));
-		EXPECT_EQ(0, WEXITSTATUS(status));
-	}
+	EXPECT_EQ(true, WIFSIGNALED(status));
+	EXPECT_EQ(SIGTERM, WTERMSIG(status));
 }
 
 /*
