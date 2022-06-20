@@ -297,7 +297,6 @@ void fuse_request_end(struct fuse_req *req)
 		spin_unlock(&fiq->lock);
 	}
 	WARN_ON(test_bit(FR_PENDING, &req->flags));
-	WARN_ON(test_bit(FR_SENT, &req->flags));
 	if (test_bit(FR_BACKGROUND, &req->flags)) {
 		spin_lock(&fc->bg_lock);
 		clear_bit(FR_BACKGROUND, &req->flags);
@@ -385,30 +384,33 @@ static void request_wait_answer(struct fuse_req *req)
 			queue_interrupt(req);
 	}
 
-	if (!test_bit(FR_FORCE, &req->flags)) {
-		/* Only fatal signals may interrupt this */
-		err = wait_event_killable(req->waitq,
-					test_bit(FR_FINISHED, &req->flags));
-		if (!err)
-			return;
+	/* Only fatal signals may interrupt this */
+	err = wait_event_killable(req->waitq,
+				test_bit(FR_FINISHED, &req->flags));
+	if (!err)
+		return;
 
-		spin_lock(&fiq->lock);
-		/* Request is not yet in userspace, bail out */
-		if (test_bit(FR_PENDING, &req->flags)) {
-			list_del(&req->list);
-			spin_unlock(&fiq->lock);
-			__fuse_put_request(req);
-			req->out.h.error = -EINTR;
-			return;
-		}
+	spin_lock(&fiq->lock);
+	/* Request is not yet in userspace, bail out */
+	if (test_bit(FR_PENDING, &req->flags)) {
+		list_del(&req->list);
 		spin_unlock(&fiq->lock);
+		__fuse_put_request(req);
+		req->out.h.error = -EINTR;
+		return;
 	}
+	spin_unlock(&fiq->lock);
 
 	/*
-	 * Either request is already in userspace, or it was forced.
-	 * Wait it out.
+	 * Womp womp. We sent a request to userspace and now we're getting
+	 * killed.
 	 */
-	wait_event(req->waitq, test_bit(FR_FINISHED, &req->flags));
+	set_bit(FR_INTERRUPTED, &req->flags);
+	/* matches barrier in fuse_dev_do_read() */
+	smp_mb__after_atomic();
+	/* request *must* be FR_SENT here, because we ignored FR_PENDING before */
+	WARN_ON(!test_bit(FR_SENT, &req->flags));
+	queue_interrupt(req);
 }
 
 static void __fuse_request_send(struct fuse_req *req)
