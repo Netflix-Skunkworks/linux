@@ -37,6 +37,8 @@ struct kernfs_open_node {
 	atomic_t		event;
 	wait_queue_head_t	poll;
 	struct list_head	files; /* goes through kernfs_open_file.list */
+	unsigned int		nr_mmapped;
+	unsigned int		nr_to_release;
 };
 
 /*
@@ -447,6 +449,106 @@ static const struct vm_operations_struct kernfs_vm_ops = {
 #endif
 };
 
+/**
+ *	kernfs_get_open_node - get or create kernfs_open_node
+ *	@kn: target kernfs_node
+ *	@of: kernfs_open_file for this instance of open
+ *
+ *	If @kn->attr.open exists, increment its reference count; otherwise,
+ *	create one.  @of is chained to the files list.
+ *
+ *	LOCKING:
+ *	Kernel thread context (may sleep).
+ *
+ *	RETURNS:
+ *	0 on success, -errno on failure.
+ */
+static int kernfs_get_open_node(struct kernfs_node *kn,
+				struct kernfs_open_file *of)
+{
+	struct kernfs_open_node *on, *new_on = NULL;
+
+ retry:
+	mutex_lock(&kernfs_open_file_mutex);
+	spin_lock_irq(&kernfs_open_node_lock);
+
+	if (!kn->attr.open && new_on) {
+		kn->attr.open = new_on;
+		new_on = NULL;
+	}
+
+	on = kn->attr.open;
+	if (on) {
+		atomic_inc(&on->refcnt);
+		list_add_tail(&of->list, &on->files);
+		if (kn->flags & KERNFS_HAS_RELEASE)
+			on->nr_to_release++;
+	}
+
+	spin_unlock_irq(&kernfs_open_node_lock);
+	mutex_unlock(&kernfs_open_file_mutex);
+
+	if (on) {
+		kfree(new_on);
+		return 0;
+	}
+
+	/* not there, initialize a new one and retry */
+	new_on = kzalloc(sizeof(*new_on), GFP_KERNEL);
+	if (!new_on)
+		return -ENOMEM;
+
+	atomic_set(&new_on->refcnt, 0);
+	atomic_set(&new_on->event, 1);
+	init_waitqueue_head(&new_on->poll);
+	INIT_LIST_HEAD(&new_on->files);
+	goto retry;
+}
+
+/**
+ *	kernfs_put_open_node - put kernfs_open_node
+ *	@kn: target kernfs_nodet
+ *	@of: associated kernfs_open_file
+ *	@open_failed: ->open() failed, cancel ->release()
+ *
+ *	Put @kn->attr.open and unlink @of from the files list.  If
+ *	reference count reaches zero, disassociate and free it.
+ *
+ *	LOCKING:
+ *	None.
+ */
+static void kernfs_put_open_node(struct kernfs_node *kn,
+				 struct kernfs_open_file *of,
+				 bool open_failed)
+{
+	struct kernfs_open_node *on = kn->attr.open;
+	unsigned long flags;
+
+	mutex_lock(&kernfs_open_file_mutex);
+	spin_lock_irqsave(&kernfs_open_node_lock, flags);
+
+	if (of) {
+		if (kn->flags & KERNFS_HAS_RELEASE) {
+			WARN_ON_ONCE(of->released == open_failed);
+			if (open_failed)
+				on->nr_to_release--;
+		}
+		if (of->mmapped)
+			on->nr_mmapped--;
+		list_del(&of->list);
+	}
+
+	if (atomic_dec_and_test(&on->refcnt))
+		kn->attr.open = NULL;
+	else
+		on = NULL;
+
+	spin_unlock_irqrestore(&kernfs_open_node_lock, flags);
+	mutex_unlock(&kernfs_open_file_mutex);
+
+	kfree(on);
+}
+
 static int kernfs_fop_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct kernfs_open_file *of = kernfs_of(file);
@@ -494,104 +596,22 @@ static int kernfs_fop_mmap(struct file *file, struct vm_area_struct *vma)
 	if (vma->vm_ops && vma->vm_ops->close)
 		goto out_put;
 
+	rc = kernfs_get_open_node(of->kn, of);
+	if (!rc)
+		goto out_put;
+
 	rc = 0;
 	of->mmapped = true;
+	of->kn->attr.open->nr_mmapped++;
 	of->vm_ops = vma->vm_ops;
 	vma->vm_ops = &kernfs_vm_ops;
+
+	kernfs_put_open_node(of->kn, of, false);
 out_put:
 	kernfs_put_active(of->kn);
 out_unlock:
 	mutex_unlock(&of->mutex);
-
 	return rc;
-}
-
-/**
- *	kernfs_get_open_node - get or create kernfs_open_node
- *	@kn: target kernfs_node
- *	@of: kernfs_open_file for this instance of open
- *
- *	If @kn->attr.open exists, increment its reference count; otherwise,
- *	create one.  @of is chained to the files list.
- *
- *	LOCKING:
- *	Kernel thread context (may sleep).
- *
- *	RETURNS:
- *	0 on success, -errno on failure.
- */
-static int kernfs_get_open_node(struct kernfs_node *kn,
-				struct kernfs_open_file *of)
-{
-	struct kernfs_open_node *on, *new_on = NULL;
-
- retry:
-	mutex_lock(&kernfs_open_file_mutex);
-	spin_lock_irq(&kernfs_open_node_lock);
-
-	if (!kn->attr.open && new_on) {
-		kn->attr.open = new_on;
-		new_on = NULL;
-	}
-
-	on = kn->attr.open;
-	if (on) {
-		atomic_inc(&on->refcnt);
-		list_add_tail(&of->list, &on->files);
-	}
-
-	spin_unlock_irq(&kernfs_open_node_lock);
-	mutex_unlock(&kernfs_open_file_mutex);
-
-	if (on) {
-		kfree(new_on);
-		return 0;
-	}
-
-	/* not there, initialize a new one and retry */
-	new_on = kmalloc(sizeof(*new_on), GFP_KERNEL);
-	if (!new_on)
-		return -ENOMEM;
-
-	atomic_set(&new_on->refcnt, 0);
-	atomic_set(&new_on->event, 1);
-	init_waitqueue_head(&new_on->poll);
-	INIT_LIST_HEAD(&new_on->files);
-	goto retry;
-}
-
-/**
- *	kernfs_put_open_node - put kernfs_open_node
- *	@kn: target kernfs_nodet
- *	@of: associated kernfs_open_file
- *
- *	Put @kn->attr.open and unlink @of from the files list.  If
- *	reference count reaches zero, disassociate and free it.
- *
- *	LOCKING:
- *	None.
- */
-static void kernfs_put_open_node(struct kernfs_node *kn,
-				 struct kernfs_open_file *of)
-{
-	struct kernfs_open_node *on = kn->attr.open;
-	unsigned long flags;
-
-	mutex_lock(&kernfs_open_file_mutex);
-	spin_lock_irqsave(&kernfs_open_node_lock, flags);
-
-	if (of)
-		list_del(&of->list);
-
-	if (atomic_dec_and_test(&on->refcnt))
-		kn->attr.open = NULL;
-	else
-		on = NULL;
-
-	spin_unlock_irqrestore(&kernfs_open_node_lock, flags);
-	mutex_unlock(&kernfs_open_file_mutex);
-
-	kfree(on);
 }
 
 static int kernfs_fop_open(struct inode *inode, struct file *file)
@@ -711,7 +731,7 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
 	return 0;
 
 err_put_node:
-	kernfs_put_open_node(kn, of);
+	kernfs_put_open_node(kn, of, true);
 err_seq_release:
 	seq_release(inode, file);
 err_free:
@@ -726,6 +746,9 @@ err_out:
 static void kernfs_release_file(struct kernfs_node *kn,
 				struct kernfs_open_file *of)
 {
+	struct kernfs_open_node *on;
+	unsigned long flags;
+
 	/*
 	 * @of is guaranteed to have no other file operations in flight and
 	 * we just want to synchronize release and drain paths.
@@ -743,6 +766,12 @@ static void kernfs_release_file(struct kernfs_node *kn,
 		 */
 		kn->attr.ops->release(of);
 		of->released = true;
+
+		spin_lock_irqsave(&kernfs_open_node_lock, flags);
+		on = kn->attr.open;
+		if (on)
+			on->nr_to_release--;
+		spin_unlock_irqrestore(&kernfs_open_node_lock, flags);
 	}
 }
 
@@ -757,12 +786,31 @@ static int kernfs_fop_release(struct inode *inode, struct file *filp)
 		mutex_unlock(&kernfs_open_file_mutex);
 	}
 
-	kernfs_put_open_node(kn, of);
+	kernfs_put_open_node(kn, of, false);
 	seq_release(inode, filp);
 	kfree(of->prealloc_buf);
 	kfree(of);
 
 	return 0;
+}
+
+bool kernfs_should_drain_open_files(struct kernfs_node *kn)
+{
+	struct kernfs_open_node *on;
+	bool ret;
+
+	/*
+	 * @kn being deactivated guarantees that @kn->attr.open can't change
+	 * beneath us making the lockless test below safe.
+	 */
+	WARN_ON_ONCE(atomic_read(&kn->active) != KN_DEACTIVATED_BIAS);
+
+	spin_lock_irq(&kernfs_open_node_lock);
+	on = kn->attr.open;
+	ret = on && (on->nr_mmapped || on->nr_to_release);
+	spin_unlock_irq(&kernfs_open_node_lock);
+
+	return ret;
 }
 
 void kernfs_drain_open_files(struct kernfs_node *kn)
@@ -786,16 +834,24 @@ void kernfs_drain_open_files(struct kernfs_node *kn)
 	list_for_each_entry(of, &on->files, list) {
 		struct inode *inode = file_inode(of->file);
 
-		if (kn->flags & KERNFS_HAS_MMAP)
+		if (of->mmapped) {
 			unmap_mapping_range(inode->i_mapping, 0, 0, 1);
+			of->mmapped = false;
+			spin_lock_irq(&kernfs_open_node_lock);
+			on = kn->attr.open;
+			if (on)
+				on->nr_mmapped--;
+			spin_unlock_irq(&kernfs_open_node_lock);
+		}
 
 		if (kn->flags & KERNFS_HAS_RELEASE)
 			kernfs_release_file(kn, of);
 	}
 
+	WARN_ON_ONCE(on->nr_mmapped || on->nr_to_release);
 	mutex_unlock(&kernfs_open_file_mutex);
 
-	kernfs_put_open_node(kn, NULL);
+	kernfs_put_open_node(kn, NULL, false);
 }
 
 /*
