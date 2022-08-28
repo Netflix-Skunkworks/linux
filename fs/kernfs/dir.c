@@ -705,13 +705,7 @@ struct kernfs_node *kernfs_find_and_get_node_by_id(struct kernfs_root *root,
 			goto err_unlock;
 	}
 
-	/*
-	 * ACTIVATED is protected with kernfs_mutex but it was clear when
-	 * @kn was added to idr and we just wanna see it set.  No need to
-	 * grab kernfs_mutex.
-	 */
-	if (unlikely(!(kn->flags & KERNFS_ACTIVATED) ||
-		     !atomic_inc_not_zero(&kn->count)))
+	if (unlikely(!kernfs_active(kn) || !atomic_inc_not_zero(&kn->count)))
 		goto err_unlock;
 
 	spin_unlock(&kernfs_idr_lock);
@@ -752,10 +746,7 @@ int kernfs_add_one(struct kernfs_node *kn)
 		goto out_unlock;
 
 	ret = -ENOENT;
-	if (parent->flags & KERNFS_EMPTY_DIR)
-		goto out_unlock;
-
-	if ((parent->flags & KERNFS_ACTIVATED) && !kernfs_active(parent))
+	if (parent->flags & (KERNFS_REMOVING | KERNFS_EMPTY_DIR))
 		goto out_unlock;
 
 	kn->hash = kernfs_name_hash(kn->name, kn->ns);
@@ -1290,6 +1281,21 @@ static struct kernfs_node *kernfs_next_descendant_post(struct kernfs_node *pos,
 	return pos->parent;
 }
 
+static void kernfs_activate_one(struct kernfs_node *kn)
+{
+	lockdep_assert_held_write(&kernfs_rwsem);
+
+	kn->flags |= KERNFS_ACTIVATED;
+
+	if (kernfs_active(kn) || (kn->flags & (KERNFS_HIDDEN | KERNFS_REMOVING)))
+		return;
+
+	WARN_ON_ONCE(kn->parent && RB_EMPTY_NODE(&kn->rb));
+	WARN_ON_ONCE(atomic_read(&kn->active) != KN_DEACTIVATED_BIAS);
+
+	atomic_sub(KN_DEACTIVATED_BIAS, &kn->active);
+}
+
 /**
  * kernfs_activate - activate a node which started deactivated
  * @kn: kernfs_node whose subtree is to be activated
@@ -1310,15 +1316,40 @@ void kernfs_activate(struct kernfs_node *kn)
 	down_write(&kernfs_rwsem);
 
 	pos = NULL;
-	while ((pos = kernfs_next_descendant_post(pos, kn))) {
-		if (pos->flags & KERNFS_ACTIVATED)
-			continue;
+	while ((pos = kernfs_next_descendant_post(pos, kn)))
+		kernfs_activate_one(pos);
 
-		WARN_ON_ONCE(pos->parent && RB_EMPTY_NODE(&pos->rb));
-		WARN_ON_ONCE(atomic_read(&pos->active) != KN_DEACTIVATED_BIAS);
+	up_write(&kernfs_rwsem);
+}
 
-		atomic_sub(KN_DEACTIVATED_BIAS, &pos->active);
-		pos->flags |= KERNFS_ACTIVATED;
+/**
+ * kernfs_show - show or hide a node
+ * @kn: kernfs_node to show or hide
+ * @show: whether to show or hide
+ *
+ * If @show is %false, @kn is marked hidden and deactivated. A hidden node is
+ * ignored in future activaitons. If %true, the mark is removed and activation
+ * state is restored. This function won't implicitly activate a new node in a
+ * %KERNFS_ROOT_CREATE_DEACTIVATED root which hasn't been activated yet.
+ *
+ * To avoid recursion complexities, directories aren't supported for now.
+ */
+void kernfs_show(struct kernfs_node *kn, bool show)
+{
+	if (WARN_ON_ONCE(kernfs_type(kn) == KERNFS_DIR))
+		return;
+
+	down_write(&kernfs_rwsem);
+
+	if (show) {
+		kn->flags &= ~KERNFS_HIDDEN;
+		if (kn->flags & KERNFS_ACTIVATED)
+			kernfs_activate_one(kn);
+	} else {
+		kn->flags |= KERNFS_HIDDEN;
+		if (kernfs_active(kn))
+			atomic_add(KN_DEACTIVATED_BIAS, &kn->active);
+		kernfs_drain(kn);
 	}
 
 	up_write(&kernfs_rwsem);
@@ -1340,11 +1371,13 @@ static void __kernfs_remove(struct kernfs_node *kn)
 
 	pr_debug("kernfs %s: removing\n", kn->name);
 
-	/* prevent any new usage under @kn by deactivating all nodes */
+	/* prevent new usage by marking all nodes removing and deactivating */
 	pos = NULL;
-	while ((pos = kernfs_next_descendant_post(pos, kn)))
+	while ((pos = kernfs_next_descendant_post(pos, kn))) {
+		pos->flags |= KERNFS_REMOVING;
 		if (kernfs_active(pos))
 			atomic_add(KN_DEACTIVATED_BIAS, &pos->active);
+	}
 
 	/* deactivate and unlink the subtree node-by-node */
 	do {
