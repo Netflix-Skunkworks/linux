@@ -3156,3 +3156,5 @@ enum cpu_cftype_id {
 
 extern struct cftype cpu_cftypes[CPU_CFTYPE_CNT + 1];
 #endif /* CONFIG_CGROUP_SCHED */
+
+#include "ext.h"
