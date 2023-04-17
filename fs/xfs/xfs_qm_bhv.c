@@ -27,7 +27,7 @@ xfs_fill_statvfs_from_dquot(
 	limit = dqp->q_blk.softlimit ?
 		dqp->q_blk.softlimit :
 		dqp->q_blk.hardlimit;
-	if (limit && statp->f_blocks > limit) {
+	if (limit) {
 		statp->f_blocks = limit;
 		statp->f_bfree = statp->f_bavail =
 			(statp->f_blocks > dqp->q_blk.reserved) ?
@@ -37,7 +37,7 @@ xfs_fill_statvfs_from_dquot(
 	limit = dqp->q_ino.softlimit ?
 		dqp->q_ino.softlimit :
 		dqp->q_ino.hardlimit;
-	if (limit && statp->f_files > limit) {
+	if (limit) {
 		statp->f_files = limit;
 		statp->f_ffree =
 			(statp->f_files > dqp->q_ino.reserved) ?
