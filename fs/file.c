@@ -20,6 +20,7 @@
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
 #include <linux/close_range.h>
+#include <linux/misc_cgroup.h>
 #include <net/sock.h>
 
 #include "internal.h"
@@ -304,6 +305,28 @@ static unsigned int sane_fdtable_size(struct fdtable *fdt, unsigned int max_fds)
 	return ALIGN(min(count, max_fds), BITS_PER_LONG);
 }
 
+#ifdef CONFIG_CGROUP_MISC
+static int charge_current_fds(struct files_struct *files, unsigned int count)
+{
+	return misc_cg_try_charge(MISC_CG_RES_NOFILE, files->mcg, count);
+}
+
+static void uncharge_current_fds(struct files_struct *files, unsigned int count)
+{
+	misc_cg_uncharge(MISC_CG_RES_NOFILE, files->mcg, count);
+}
+#else
+static int charge_current_fds(struct files_struct *files, unsigned int count)
+{
+	return 0;
+}
+
+static void uncharge_current_fds(struct files_struct *files, unsigned int count)
+{
+	return;
+}
+#endif
+
 /*
  * Allocate a new files structure and copy contents from the
  * passed in files structure.
@@ -327,6 +350,7 @@ struct files_struct *dup_fd(struct files_struct *oldf, unsigned int max_fds, int
 	newf->resize_in_progress = false;
 	init_waitqueue_head(&newf->resize_wait);
 	newf->next_fd = 0;
+	newf->mcg = get_current_misc_cg();
 	new_fdt = &newf->fdtab;
 	new_fdt->max_fds = NR_OPEN_DEFAULT;
 	new_fdt->close_on_exec = newf->close_on_exec_init;
@@ -336,6 +360,7 @@ struct files_struct *dup_fd(struct files_struct *oldf, unsigned int max_fds, int
 
 	spin_lock(&oldf->file_lock);
 	old_fdt = files_fdtable(oldf);
+
 	open_files = sane_fdtable_size(old_fdt, max_fds);
 
 	/*
@@ -397,9 +422,21 @@ struct files_struct *dup_fd(struct files_struct *oldf, unsigned int max_fds, int
 
 	rcu_assign_pointer(newf->fdt, new_fdt);
 
-	return newf;
+	if (!charge_current_fds(newf, count_open_files(new_fdt)))
+		return newf;
+
+	new_fds = new_fdt->fd;
+	for (i = open_files; i != 0; i--) {
+		struct file *f = *new_fds++;
+		if (f)
+			fput(f);
+	}
+	if (new_fdt != &newf->fdtab)
+		__free_fdtable(new_fdt);
+	*errorp = -EMFILE;
 
 out_release:
+	put_misc_cg(newf->mcg);
 	kmem_cache_free(files_cachep, newf);
 out:
 	return NULL;
@@ -425,6 +462,7 @@ static struct fdtable *close_files(struct files_struct * files)
 			if (set & 1) {
 				struct file * file = xchg(&fdt->fd[i], NULL);
 				if (file) {
+					uncharge_current_fds(files, 1);
 					filp_close(file, files);
 					cond_resched();
 				}
@@ -433,6 +471,8 @@ static struct fdtable *close_files(struct files_struct * files)
 			set >>= 1;
 		}
 	}
+
+	put_misc_cg(files->mcg);
 
 	return fdt;
 }
@@ -528,6 +568,10 @@ repeat:
 	if (error)
 		goto repeat;
 
+	error = -EMFILE;
+	if (charge_current_fds(files, 1) < 0)
+		goto out;
+
 	if (start <= files->next_fd)
 		files->next_fd = fd + 1;
 
@@ -564,6 +608,8 @@ EXPORT_SYMBOL(get_unused_fd_flags);
 static void __put_unused_fd(struct files_struct *files, unsigned int fd)
 {
 	struct fdtable *fdt = files_fdtable(files);
+	if (test_bit(fd, fdt->open_fds))
+		uncharge_current_fds(files, 1);
 	__clear_open_fd(fd, fdt);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
@@ -1119,7 +1165,7 @@ __releases(&files->file_lock)
 	 */
 	fdt = files_fdtable(files);
 	tofree = fdt->fd[fd];
-	if (!tofree && fd_is_open(fd, fdt))
+	if (!tofree && (fd_is_open(fd, fdt) || charge_current_fds(files, 1) < 0))
 		goto Ebusy;
 	get_file(file);
 	rcu_assign_pointer(fdt->fd[fd], file);
