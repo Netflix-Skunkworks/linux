@@ -8,3 +8,4 @@ test_cpu
 test_cpuset
 test_zswap
 wait_inotify
+test_misc
