@@ -272,14 +272,18 @@ static inline void __clear_open_fd(unsigned int fd, struct fdtable *fdt)
 	__clear_bit(fd / BITS_PER_LONG, fdt->full_fds_bits);
 }
 
-unsigned int count_open_files(struct fdtable *fdt)
+static unsigned int count_open_files(struct fdtable *fdt)
 {
-	int i;
-	int retval = 0;
+	unsigned int size = fdt->max_fds;
+	unsigned int i;
 
-	for (i = 0; i < DIV_ROUND_UP(fdt->max_fds, BITS_PER_LONG); i++)
-		retval += hweight64((__u64)fdt->open_fds[i]);
-	return retval;
+	/* Find the last open fd */
+	for (i = size / BITS_PER_LONG; i > 0; ) {
+		if (fdt->open_fds[--i])
+			break;
+	}
+	i = (i + 1) * BITS_PER_LONG;
+	return i;
 }
 
 /*
