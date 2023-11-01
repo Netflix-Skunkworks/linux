@@ -135,4 +135,6 @@ extern int unshare_fd(unsigned long unshare_flags, unsigned int max_fds,
 
 extern struct kmem_cache *files_cachep;
 
+unsigned int count_open_fds(struct fdtable *fdt);
+
 #endif /* __LINUX_FDTABLE_H */

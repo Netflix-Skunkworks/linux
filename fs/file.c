@@ -286,6 +286,16 @@ static unsigned int count_open_files(struct fdtable *fdt)
 	return i;
 }
 
+unsigned int count_open_fds(struct fdtable *fdt)
+{
+	int i;
+	unsigned long retval;
+
+	for (i = 0; i < DIV_ROUND_UP(fdt->max_fds, BITS_PER_LONG); i++)
+		retval += hweight64((__u64)fdt->open_fds[i]);
+	return retval;
+}
+
 /*
  * Note that a sane fdtable size always has to be a multiple of
  * BITS_PER_LONG, since we have bitmaps that are sized by this.
@@ -426,7 +436,7 @@ struct files_struct *dup_fd(struct files_struct *oldf, unsigned int max_fds, int
 
 	rcu_assign_pointer(newf->fdt, new_fdt);
 
-	if (!charge_current_fds(newf, count_open_files(new_fdt)))
+	if (!charge_current_fds(newf, count_open_fds(new_fdt)))
 		return newf;
 
 	new_fds = new_fdt->fd;

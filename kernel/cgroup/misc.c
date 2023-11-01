@@ -480,7 +480,7 @@ static void revert_attach_until(struct cgroup_taskset *tset, struct task_struct 
 
 		WARN_ON_ONCE(old_misc != files->mcg);
 
-		nofile = count_open_files(fdt);
+		nofile = count_open_fds(fdt);
 		misc_cg_charge(MISC_CG_RES_NOFILE, old_misc, nofile);
 		misc_cg_uncharge(MISC_CG_RES_NOFILE, misc, nofile);
 
@@ -528,7 +528,7 @@ static int charge_files(struct cgroup_taskset *tset)
 
 		WARN_ON_ONCE(old_misc != files->mcg);
 
-		nofile = count_open_files(fdt);
+		nofile = count_open_fds(fdt);
 		ret = misc_cg_try_charge(MISC_CG_RES_NOFILE, misc, nofile);
 		if (ret < 0) {
 			spin_unlock(&files->file_lock);
@@ -597,7 +597,7 @@ static int misc_cg_can_fork(struct task_struct *task, struct css_set *cset)
 	if (files->mcg == dst_misc)
 		goto out;
 
-	nofile = count_open_files(fdt);
+	nofile = count_open_fds(fdt);
 	ret = misc_cg_try_charge(MISC_CG_RES_NOFILE, dst_misc, nofile);
 	if (ret < 0)
 		goto out;
@@ -635,7 +635,7 @@ static void misc_cg_cancel_fork(struct task_struct *task, struct css_set *cset)
 	/*
 	 * we don't need to re-charge anyone, since this fork is going away.
 	 */
-	nofile = count_open_files(fdt);
+	nofile = count_open_fds(fdt);
 	misc_cg_uncharge(MISC_CG_RES_NOFILE, dst_misc, nofile);
 	spin_unlock(&files->file_lock);
 	task_unlock(task);
