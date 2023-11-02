@@ -466,19 +466,22 @@ static void revert_attach_until(struct cgroup_taskset *tset, struct task_struct 
 		if (task == stop)
 			break;
 
-		if (misc == old_misc)
-			continue;
-
 		misc = css_misc(dst_css);
 		old_css = task_css(task, misc_cgrp_id);
 		old_misc = css_misc(old_css);
+
+		if (misc == old_misc)
+			continue;
 
 		task_lock(task);
 		files = task->files;
 		spin_lock(&files->file_lock);
 		fdt = files_fdtable(files);
 
-		WARN_ON_ONCE(old_misc != files->mcg);
+		if (old_misc == files->mcg)
+			goto done;
+
+		WARN_ON_ONCE(misc != files->mcg);
 
 		nofile = count_open_fds(fdt);
 		misc_cg_charge(MISC_CG_RES_NOFILE, old_misc, nofile);
@@ -488,6 +491,7 @@ static void revert_attach_until(struct cgroup_taskset *tset, struct task_struct 
 		css_get(old_css);
 		files->mcg = old_misc;
 
+done:
 		spin_unlock(&files->file_lock);
 		task_unlock(task);
 	}
