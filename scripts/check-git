@@ -3,6 +3,8 @@
 #
 # succeed if we are in a git repository
 
+set -x
+
 srctree="$(dirname $0)/.."
 
 if ! git -C "${srctree}" rev-parse --verify HEAD >/dev/null 2>/dev/null; then

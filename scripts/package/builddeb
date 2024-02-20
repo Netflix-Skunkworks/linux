@@ -28,6 +28,8 @@ create_package() {
 	local pname="$1" pdir="$2"
 	local dpkg_deb_opts
 
+	>&2 echo "$(date): starting create_package"
+
 	mkdir -m 755 -p "$pdir/DEBIAN"
 	mkdir -p "$pdir/usr/share/doc/$pname"
 	cp debian/copyright "$pdir/usr/share/doc/$pname/"
@@ -48,7 +50,10 @@ create_package() {
 
 	# Create the package
 	dpkg-gencontrol -p$pname -P"$pdir"
+	>&2 echo "$(date): about to dpkg-deb"
 	dpkg-deb $dpkg_deb_opts ${KDEB_COMPRESS:+-Z$KDEB_COMPRESS} --build "$pdir" ..
+
+	>&2 echo "$(date): finished w/ create_package"
 }
 
 install_linux_image () {
