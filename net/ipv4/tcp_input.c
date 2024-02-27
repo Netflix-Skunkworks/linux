@@ -3539,7 +3539,7 @@ static inline bool tcp_may_update_window(const struct tcp_sock *tp,
 {
 	return	after(ack, tp->snd_una) ||
 		after(ack_seq, tp->snd_wl1) ||
-		(ack_seq == tp->snd_wl1 && (nwin > tp->snd_wnd || !nwin));
+		(ack_seq == tp->snd_wl1 && nwin > tp->snd_wnd);
 }
 
 /* If we update tp->snd_una, also update tp->bytes_acked */
