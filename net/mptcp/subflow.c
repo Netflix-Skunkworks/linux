@@ -1366,7 +1366,7 @@ void mptcp_space(const struct sock *ssk, int *space, int *full_space)
 	const struct sock *sk = subflow->conn;
 
 	*space = __mptcp_space(sk);
-	*full_space = mptcp_win_from_space(sk, READ_ONCE(sk->sk_rcvbuf));
+	*full_space = tcp_full_space(sk);
 }
 
 static void subflow_error_report(struct sock *ssk)
