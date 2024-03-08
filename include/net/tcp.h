@@ -1462,10 +1462,19 @@ static inline int tcp_space_from_win(const struct sock *sk, int win)
 
 static inline void tcp_scaling_ratio_init(struct sock *sk)
 {
-	/* Assume a conservative default of 1200 bytes of payload per 4K page.
-	 * This may be adjusted later in tcp_measure_rcv_mss().
+	/* Assume a conservative default of either 1200 or 2400 bytes of payload
+         * per 4K page. This may be adjusted later in tcp_measure_rcv_mss().
 	 */
-	tcp_sk(sk)->scaling_ratio = (1200 << TCP_RMEM_TO_WIN_SCALE) /
+	int rcvbuf, rmem, payload_size;
+	rmem = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_rmem[1]);
+	rcvbuf = READ_ONCE(sk->sk_rcvbuf);
+
+	if (rcvbuf << 1 < rmem)
+		payload_size = 1200 << 1;
+	else
+		payload_size = 1200;
+
+	tcp_sk(sk)->scaling_ratio = (payload_size << TCP_RMEM_TO_WIN_SCALE) /
 				    SKB_TRUESIZE(4096);
 }
 
