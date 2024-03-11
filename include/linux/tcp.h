@@ -187,8 +187,6 @@ static inline bool tcp_rsk_used_ao(const struct request_sock *req)
 #endif
 }
 
-#define TCP_RMEM_TO_WIN_SCALE 8
-
 struct tcp_sock {
 	/* inet_connection_sock has to be the first member of tcp_sock */
 	struct inet_connection_sock	inet_conn;
@@ -255,7 +253,7 @@ struct tcp_sock {
 
 	u32	window_clamp;	/* Maximal window to advertise		*/
 	u32	rcv_ssthresh;	/* Current window clamp			*/
-	u8	scaling_ratio;	/* see tcp_win_from_space() */
+
 	/* Information of the most recently (s)acked skb */
 	struct tcp_rack {
 		u64 mstamp; /* (Re)sent time of the skb */
