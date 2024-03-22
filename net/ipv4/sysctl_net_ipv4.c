@@ -1213,6 +1213,15 @@ static struct ctl_table ipv4_net_table[] = {
 		.extra2		= &tcp_adv_win_scale_max,
 	},
 	{
+		.procname	= "tcp_adv_win_scale_enabled",
+		.data		= &init_net.ipv4.sysctl_tcp_adv_win_scale_enabled,
+		.maxlen         = sizeof(u8),
+		.mode           = 0644,
+		.proc_handler   = proc_dou8vec_minmax,
+		.extra1         = SYSCTL_ZERO,
+		.extra2         = SYSCTL_ONE,
+	},
+	{
 		.procname	= "tcp_frto",
 		.data		= &init_net.ipv4.sysctl_tcp_frto,
 		.maxlen		= sizeof(u8),

@@ -1473,6 +1473,14 @@ static inline int __tcp_win_from_space(u8 scaling_ratio, int space)
 
 static inline int tcp_win_from_space(const struct sock *sk, int space)
 {
+	if (READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_adv_win_scale_enabled)) {
+		int tcp_adv_win_scale =
+			READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_adv_win_scale);
+
+		return tcp_adv_win_scale <= 0 ?
+			(space>>(-tcp_adv_win_scale)) :
+			space - (space>>tcp_adv_win_scale);
+	}
 	return __tcp_win_from_space(tcp_sk(sk)->scaling_ratio, space);
 }
 
@@ -1487,13 +1495,25 @@ static inline int __tcp_space_from_win(u8 scaling_ratio, int win)
 
 static inline int tcp_space_from_win(const struct sock *sk, int win)
 {
+	if (READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_adv_win_scale_enabled)) {
+		int advmss = tcp_sk(sk)->advmss;
+		int tcp_adv_win_scale =
+			READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_adv_win_scale);
+		int rcvmem = tcp_adv_win_scale <= 0 ?
+			(advmss << (-tcp_adv_win_scale)) :
+			DIV_ROUND_UP(advmss << tcp_adv_win_scale, 
+					(1 << tcp_adv_win_scale) - 1);
+
+		do_div(win, advmss);
+		return win * rcvmem;
+	}
 	return __tcp_space_from_win(tcp_sk(sk)->scaling_ratio, win);
 }
 
-/* Assume a conservative default of 1200 bytes of payload per 4K page.
+/* Assume a conservative default of 2000 bytes of payload per 4K page.
  * This may be adjusted later in tcp_measure_rcv_mss().
  */
-#define TCP_DEFAULT_SCALING_RATIO ((1200 << TCP_RMEM_TO_WIN_SCALE) / \
+#define TCP_DEFAULT_SCALING_RATIO ((2000 << TCP_RMEM_TO_WIN_SCALE) / \
 				   SKB_TRUESIZE(4096))
 
 static inline void tcp_scaling_ratio_init(struct sock *sk)

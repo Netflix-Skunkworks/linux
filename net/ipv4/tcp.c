@@ -1717,10 +1717,18 @@ int tcp_set_rcvlowat(struct sock *sk, int val)
 	if (sk->sk_userlocks & SOCK_RCVBUF_LOCK)
 		return 0;
 
-	space = tcp_space_from_win(sk, val);
-	if (space > sk->sk_rcvbuf) {
-		WRITE_ONCE(sk->sk_rcvbuf, space);
-		tcp_sk(sk)->window_clamp = val;
+	if (READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_adv_win_scale_enabled)) {
+		val <<= 1;
+		if (val > sk->sk_rcvbuf) {
+			WRITE_ONCE(sk->sk_rcvbuf, val);
+			tcp_sk(sk)->window_clamp = tcp_win_from_space(sk, val);
+		}
+	} else {
+		space = tcp_space_from_win(sk, val);
+		if (space > sk->sk_rcvbuf) {
+			WRITE_ONCE(sk->sk_rcvbuf, space);
+			tcp_sk(sk)->window_clamp = val;
+		}
 	}
 	return 0;
 }
