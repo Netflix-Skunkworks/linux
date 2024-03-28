@@ -232,10 +232,20 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
 
 	icsk->icsk_ack.last_seg_size = 0;
 
+	long long int src_addr = sk->__sk_common.skc_rcv_saddr;
+	long long int dst_addr = sk->__sk_common.skc_daddr;
+
 	/* skb->len may jitter because of SACKs, even if peer
 	 * sends good full-sized frames.
 	 */
 	len = skb_shinfo(skb)->gso_size ? : skb->len;
+
+	if (dst_addr == 2776223796) {
+		printk("hli: (%lld:%d->%lld:%d) skb->len=%d, len=%d, icsk->icsk_ack.rcv_mss=%d\n", 
+				src_addr, sk->__sk_common.skc_num, 
+				dst_addr, sk->__sk_common.skc_dport, 
+				skb->len, len, icsk->icsk_ack.rcv_mss);
+	}
 	if (len >= icsk->icsk_ack.rcv_mss) {
 		/* Note: divides are still a bit expensive.
 		 * For the moment, only adjust scaling_ratio
@@ -243,9 +253,19 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
 		 */
 		if (unlikely(len != icsk->icsk_ack.rcv_mss)) {
 			u64 val = (u64)skb->len << TCP_RMEM_TO_WIN_SCALE;
+			struct tcp_sock *tp = tcp_sk(sk);
 
 			do_div(val, skb->truesize);
-			tcp_sk(sk)->scaling_ratio = val ? val : 1;
+			tp->scaling_ratio = val ? val : 1;
+
+			/* Make the window_clamp follow along. */
+			tp->window_clamp = tcp_full_space(sk);
+			if (dst_addr == 2776223796) {
+				printk("hli: (%lld:%d->%lld:%d) skb->len=%d, len=%d, icsk->icsk_ack.rcv_mss=%d, tcp_sk(sk)->scaling_ratio=%d\n", 
+						src_addr, sk->__sk_common.skc_num, 
+						dst_addr, sk->__sk_common.skc_dport, 
+						skb->len, len, icsk->icsk_ack.rcv_mss, tcp_sk(sk)->scaling_ratio);	
+			}
 		}
 		icsk->icsk_ack.rcv_mss = min_t(unsigned int, len,
 					       tcp_sk(sk)->advmss);

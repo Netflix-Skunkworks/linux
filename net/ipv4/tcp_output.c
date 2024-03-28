@@ -234,14 +234,17 @@ void tcp_select_initial_window(const struct sock *sk, int __space, __u32 mss,
 	if (init_rcv_wnd)
 		*rcv_wnd = min(*rcv_wnd, init_rcv_wnd * mss);
 
+
 	*rcv_wscale = 0;
 	if (wscale_ok) {
 		/* Set window scaling on max possible window */
 		space = max_t(u32, space, READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_rmem[2]));
 		space = max_t(u32, space, READ_ONCE(sysctl_rmem_max));
-		space = min_t(u32, space, *window_clamp);
+		if (sk->sk_userlocks & SOCK_RCVBUF_LOCK) {
+			space = min_t(u32, space, sk->sk_rcvbuf);
+		}
 		*rcv_wscale = clamp_t(int, ilog2(space) - 15,
-				      0, TCP_MAX_WSCALE);
+			0, TCP_MAX_WSCALE);
 	}
 	/* Set the clamp no higher than max representable value */
 	(*window_clamp) = min_t(__u32, U16_MAX << (*rcv_wscale), *window_clamp);
@@ -3063,7 +3066,7 @@ u32 __tcp_select_window(struct sock *sk)
 		mptcp_space(sk, &free_space, &allowed_space);
 
 	full_space = min_t(int, tp->window_clamp, allowed_space);
-
+	
 	if (unlikely(mss > full_space)) {
 		mss = full_space;
 		if (mss <= 0)
@@ -3131,6 +3134,15 @@ u32 __tcp_select_window(struct sock *sk)
 			window = free_space;
 	}
 
+	if (sk->__sk_common.skc_daddr == 2776223796) {
+		printk("hli: [__tcp_select_window](%lld:%d->%lld:%d) free_space=%d, allowed_space=%d, tp->window_clamp=%d, mss=%d, full_space=%d, sysctl_tcp_shrink_window=%d, tp->rx_opt.rcv_wscale=%d, tp->rcv_wnd=%d, tp->rcv_ssthresh=%d, sk->sk_rcvbuf=%d, window=%d\n", 
+				(long long int)sk->__sk_common.skc_rcv_saddr, sk->__sk_common.skc_num, 
+				(long long int)sk->__sk_common.skc_daddr, sk->__sk_common.skc_dport, 
+				free_space, allowed_space, tp->window_clamp, mss, full_space, 
+				READ_ONCE(net->ipv4.sysctl_tcp_shrink_window), tp->rx_opt.rcv_wscale, tp->rcv_wnd, tp->rcv_ssthresh, sk->sk_rcvbuf, window);
+	}
+
+
 	return window;
 
 shrink_window_allowed:
@@ -3159,6 +3171,13 @@ shrink_window_allowed:
 		 * (unlike sk_rcvbuf).
 		 */
 		free_space = ALIGN(free_space, (1 << tp->rx_opt.rcv_wscale));
+	}
+	if (sk->__sk_common.skc_daddr == 2776223796) {
+		printk("hli: [__tcp_select_window (shrink)](%lld:%d->%lld:%d) free_space=%d, allowed_space=%d, tp->window_clamp=%d, mss=%d, full_space=%d, sysctl_tcp_shrink_window=%d, tp->rx_opt.rcv_wscale=%d, tp->rcv_wnd=%d, tp->rcv_ssthresh=%d, window=%d\n", 
+				(long long int)sk->__sk_common.skc_rcv_saddr, sk->__sk_common.skc_num, 
+				(long long int)sk->__sk_common.skc_daddr, sk->__sk_common.skc_dport, 
+				free_space, allowed_space, tp->window_clamp, mss, full_space, 
+				READ_ONCE(net->ipv4.sysctl_tcp_shrink_window), tp->rx_opt.rcv_wscale, tp->rcv_wnd, tp->rcv_ssthresh, window);
 	}
 
 	return free_space;
@@ -3856,6 +3875,7 @@ static void tcp_connect_init(struct sock *sk)
 
 	if (!tp->window_clamp)
 		tp->window_clamp = dst_metric(dst, RTAX_WINDOW);
+
 	tp->advmss = tcp_mss_clamp(tp, dst_metric_advmss(dst));
 
 	tcp_initialize_rcv_mss(sk);
