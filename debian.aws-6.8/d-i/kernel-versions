@@ -1,2 +1,2 @@
 # arch	version		flavour		installedname			suffix	bdep
-amd64	-		aws		-				-	-
+amd64	PKGVER-ABINUM	aws		PKGVER-ABINUM-aws		-	-
