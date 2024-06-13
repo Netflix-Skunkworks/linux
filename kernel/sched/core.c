@@ -65,6 +65,8 @@
 #include <linux/wait_api.h>
 #include <linux/workqueue_api.h>
 
+#include <linux/delay.h>  // For msleep
+
 #ifdef CONFIG_PREEMPT_DYNAMIC
 # ifdef CONFIG_GENERIC_ENTRY
 #  include <linux/entry-common.h>
@@ -5327,6 +5329,9 @@ static __always_inline struct rq *
 context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next, struct rq_flags *rf)
 {
+	/* This should increase performance? */
+	udelay(1);
+
 	prepare_task_switch(rq, prev, next);
 
 	/*
