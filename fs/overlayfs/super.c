@@ -753,12 +753,20 @@ static int ovl_make_workdir(struct super_block *sb, struct ovl_fs *ofs,
 	 * users over kernel upgrade, but we never allowed remote upper fs, so
 	 * we can enforce strict requirements for remote upper fs.
 	 */
-	if (ovl_dentry_remote(ofs->workdir) &&
-	    (!d_type || !rename_whiteout || ofs->noxattr)) {
-		pr_err("upper fs missing required features.\n");
-		err = -EINVAL;
-		goto out;
-	}
+
+	/*
+	 * We are commenting out this check so that we can disaggregate container
+	 * storage from compute -- which requires that we use overlayfs on an NFS
+	 * file system. Because overlayfs works fine without these features on a
+	 * local file system, it should also work fine over NFS.
+	 *
+	 * if (ovl_dentry_remote(ofs->workdir) &&
+	 *     (!d_type || !rename_whiteout || ofs->noxattr)) {
+	 *         pr_err("upper fs missing required features.\n");
+	 *         err = -EINVAL;
+	 *         goto out;
+	 * }
+	 */
 
 	/*
 	 * For volatile mount, create a incompat/volatile/dirty file to keep
